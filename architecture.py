@@ -60,3 +60,38 @@ class TriOrientatedMamba(nn.Module):
 
         # ToM(z) = Mamba(zf) + Mamba(zr) + Mamba(zs)
         return y_f + y_r + y_s
+
+
+class TSMambaBlock(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.gsc = GatedSpatialConv3d(dim)
+        self.tom = TriOrientatedMamba(d_model=dim)
+        self.norm1 = nn.LayerNorm(dim)
+        self.norm2 = nn.LayerNorm(dim)
+
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, dim * 4),
+            nn.SiLU(),
+            nn.Linear(dim * 4, dim)
+        )
+
+    def forward(self, x):
+        # 1. Local Spatial Gating [3]
+        x = self.gsc(x)
+
+        # 2. Global Tri-orientated Scanning [3]
+        B, C, D, H, W = x.shape
+        res = x
+        x = rearrange(x, 'b c d h w -> b (d h w) c')
+        x = self.norm1(x)
+        x = rearrange(x, 'b (d h w) c -> b c d h w', d=D, h=H, w=W)
+        x = self.tom(x) + res
+
+        # 3. Feature Enrichment (MLP) [3]
+        res = x
+        x = rearrange(x, 'b c d h w -> b (d h w) c')
+        x = self.norm2(x)
+        x = self.mlp(x)
+        x = rearrange(x, 'b (d h w) c -> b c d h w', d=D, h=H, w=W)
+        return x + res
