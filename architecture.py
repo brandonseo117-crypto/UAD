@@ -95,3 +95,49 @@ class TSMambaBlock(nn.Module):
         x = self.mlp(x)
         x = rearrange(x, 'b (d h w) c -> b c d h w', d=D, h=H, w=W)
         return x + res
+
+
+class MambaUAD(nn.Module):
+    def __init__(self, in_channels=1, base_dim=48):
+        super().__init__()
+        # Stem: 7x7x7 Depth-wise Conv, Stride 2 [10]
+        self.stem = nn.Conv3d(in_channels, base_dim,
+                              kernel_size=7, stride=2, padding=3)
+
+        # Encoder Layers [11]
+        self.enc1 = TSMambaBlock(base_dim)
+        self.down1 = nn.Conv3d(base_dim, base_dim*2, kernel_size=2, stride=2)
+
+        self.enc2 = TSMambaBlock(base_dim*2)
+        self.down2 = nn.Conv3d(base_dim*2, base_dim*4, kernel_size=2, stride=2)
+
+        # Bottleneck
+        self.bottleneck = TSMambaBlock(base_dim*4)
+
+        # Decoder Layers (Symmetric) [9]
+        self.up2 = nn.ConvTranspose3d(
+            base_dim*4, base_dim*2, kernel_size=2, stride=2)
+        self.dec2 = TSMambaBlock(base_dim*2)
+
+        self.up1 = nn.ConvTranspose3d(
+            base_dim*2, base_dim, kernel_size=2, stride=2)
+        self.dec1 = TSMambaBlock(base_dim)
+
+        # Final Reconstruction Head
+        self.final_up = nn.ConvTranspose3d(
+            base_dim, in_channels, kernel_size=2, stride=2)
+
+    def forward(self, x):
+        # Encoder path with skip connections
+        s0 = self.stem(x)
+        e1 = self.enc1(s0)
+        e2 = self.enc2(self.down1(e1))
+
+        b = self.bottleneck(self.down2(e2))
+
+        # Decoder path [9]
+        d2 = self.dec2(self.up2(b) + e2)  # Skip connection [11]
+        d1 = self.dec1(self.up1(d2) + e1)
+
+        out = self.final_up(d1)
+        return out, [e1, e2, b], [d1, d2]
