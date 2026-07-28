@@ -1,13 +1,14 @@
-# Core Deep Learning & Processing Frameworks
+# Image Processing & Neuroimaging
+antspyx>=0.3.8
+SimpleITK>=2.2.0
+dcm2niix>=1.0.0
+torchio>=0.19.0
+nibabel>=5.0.0
+nilearn>=0.14.0
+
+# Deep Learning & Math
 torch>=2.0.0
 numpy>=1.24.0
 
-# Neuroimaging Preprocessing Libraries
-dcm2niix>=1.0.0
-SimpleITK>=2.2.0
-torchio>=0.19.0
-monai>=1.2.0
-
-# DICOM / NIfTI I/O Helpers
-pydicom>=2.4.0
-nibabel>=5.0.0
+# Utilities
+python-dotenv>=1.0.0
