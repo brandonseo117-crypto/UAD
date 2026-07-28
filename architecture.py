@@ -141,3 +141,25 @@ class MambaUAD(nn.Module):
 
         out = self.final_up(d1)
         return out, [e1, e2, b], [d1, d2]
+
+
+class DualDomainLoss(nn.Module):
+    def __init__(self, alpha=1.0, beta=0.4):
+        super().__init__()
+        self.alpha = alpha  # Feature weight [14]
+        self.beta = beta   # Data weight [14]
+        self.huber = nn.HuberLoss()
+        self.cosine = nn.CosineSimilarity(dim=1)
+
+    def forward(self, input_vol, target_vol, enc_feats, dec_feats):
+        # 1. Data-space reconstruction (Huber Loss) [12, 13]
+        l_data = self.huber(input_vol, target_vol)
+
+        # 2. Feature-space reconstruction (Cosine Similarity) [13, 15]
+        l_feat = 0
+        for f_e, f_d in zip(enc_feats[:2], dec_feats[::-1]):
+            # Align multi-scale features [12]
+            sim = self.cosine(f_e, f_d).mean()
+            l_feat += (1 - sim)
+
+        return self.alpha * l_feat + self.beta * l_data
