@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
+import einops
 
-
-class GatedSpatialConv3d(nn.Module):
+class GatedSpatialConv3d(nn.Module): #good
     def __init__(self, channels):
         super().__init__()
         self.conv_3x3 = nn.Sequential(
@@ -28,41 +28,51 @@ class GatedSpatialConv3d(nn.Module):
 
 
 class TriOrientatedMamba(nn.Module):
-    def __init__(self, d_model, d_state=16, expand=2):
+    """
+    ToM Module (SegMamba architecture): Captures 3D spatial dependencies 
+    by scanning through Forward, Reverse, and Inter-slice orientations.
+    """
+    def __init__(self, d_model, d_state=16, d_conv=4, expand=2):
         super().__init__()
-        self.mamba = Mamba(
-            d_model=d_model,
-            d_state=d_state,
-            d_conv=4,
-            expand=expand
-        )
+        if Mamba is None:
+            raise ImportError(
+                "mamba_ssm is required. Install via `pip install mamba-ssm` "
+                "in a CUDA-enabled environment."
+            )
+            
+        # Distinct Mamba instances for each orientation
+        self.mamba_f = Mamba(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+        self.mamba_r = Mamba(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+        self.mamba_s = Mamba(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
 
     def forward(self, x):
         B, C, D, H, W = x.shape
-        L = D * H * W  # Total sequence length (e.g., 260k for 64^3)
+        L = D * H * W  # Total sequence length
 
-        # Orientation 1: Forward Direction
-        x_f = x.permute(0, 2, 3, 4, 1).view(B, L, C)
-        y_f = self.mamba(x_f)
-        # y_f: (B, D*H*W, C) -> view to (B, D, H, W, C) -> permute to (B, C, D, H, W)
+        # --- Orientation 1: Forward Direction (zf) ---
+        # (B, C, D, H, W) -> (B, L, C)
+        x_f = x.permute(0, 2, 3, 4, 1).contiguous().view(B, L, C)
+        y_f = self.mamba_f(x_f)
         y_f = y_f.view(B, D, H, W, C).permute(0, 4, 1, 2, 3)
 
-        # Orientation 2: Reverse Direction (Flipped along the sequence dimension, which is index 1)
-        x_r = x_f.flip(dims=[1])
-        y_r = self.mamba(x_r).flip(dims=[1])
+        # --- Orientation 2: Reverse Direction (zr) ---
+        # Correctly flip along dimension 1 (sequence axis L)
+        x_r = torch.flip(x_f, dims=[1])
+        y_r = self.mamba_r(x_r)
+        y_r = torch.flip(y_r, dims=[1])  # Flip back to restore original alignment
         y_r = y_r.view(B, D, H, W, C).permute(0, 4, 1, 2, 3)
 
-        # Orientation 3: Inter-slice Direction (Transpose D and W)
-        x_s = x.permute(0, 4, 3, 2, 1).view(B, L, C)
-        y_s = self.mamba(x_s)
-        # y_s: (B, W*H*D, C) -> view back to transposed shape (B, W, H, D, C) -> permute back to original (B, C, D, H, W)
+        # --- Orientation 3: Inter-slice Direction (zs) ---
+        # Transpose Depth (D) and Width (W)
+        x_s = x.permute(0, 4, 3, 2, 1).contiguous().view(B, L, C)
+        y_s = self.mamba_s(x_s)
         y_s = y_s.view(B, W, H, D, C).permute(0, 4, 3, 2, 1)
 
-        # ToM(z) = Mamba(zf) + Mamba(zr) + Mamba(zs)
+        # Fusion: Element-wise sum across all 3 spatial scans
         return y_f + y_r + y_s
 
 
-class TSMambaBlock(nn.Module):
+class TSMambaBlock(nn.Module): # good
     def __init__(self, dim):
         super().__init__()
         self.gsc = GatedSpatialConv3d(dim)
@@ -97,7 +107,7 @@ class TSMambaBlock(nn.Module):
         return x + res
 
 
-class MambaUAD(nn.Module):
+class MambaUAD(nn.Module): #Good
     def __init__(self, in_channels=1, base_dim=48):
         super().__init__()
         # Stem: 7x7x7 Depth-wise Conv, Stride 2 [10]
@@ -146,20 +156,20 @@ class MambaUAD(nn.Module):
 class DualDomainLoss(nn.Module):
     def __init__(self, alpha=1.0, beta=0.4):
         super().__init__()
-        self.alpha = alpha  # Feature weight [14]
-        self.beta = beta   # Data weight [14]
+        self.alpha = alpha  # Feature alignment weight
+        self.beta = beta    # Data-space Huber reconstruction weight
         self.huber = nn.HuberLoss()
         self.cosine = nn.CosineSimilarity(dim=1)
 
     def forward(self, input_vol, target_vol, enc_feats, dec_feats):
-        # 1. Data-space reconstruction (Huber Loss) [12, 13]
+        # 1. Voxel-space reconstruction loss
         l_data = self.huber(input_vol, target_vol)
 
-        # 2. Feature-space reconstruction (Cosine Similarity) [13, 15]
-        l_feat = 0
-        for f_e, f_d in zip(enc_feats[:2], dec_feats[::-1]):
-            # Align multi-scale features [12]
+        # 2. Feature-space cosine distance
+        l_feat = 0.0
+        # Correctly matches e1 with d1 (base_dim) and e2 with d2 (base_dim*2)
+        for f_e, f_d in zip(enc_feats, dec_feats):
             sim = self.cosine(f_e, f_d).mean()
-            l_feat += (1 - sim)
+            l_feat += (1.0 - sim)
 
         return self.alpha * l_feat + self.beta * l_data
