@@ -1,22 +1,13 @@
-# Deep Learning Framework
+# Core Deep Learning & Processing Frameworks
 torch>=2.0.0
+numpy>=1.24.0
 
-# Medical Imaging & I/O
-nibabel>=5.1.0
-pydicom>=2.4.0
-SimpleITK>=2.3.0
-antspyx>=0.4.2
+# Neuroimaging Preprocessing Libraries
+dcm2niix>=1.0.0
+SimpleITK>=2.2.0
 torchio>=0.19.0
-nilearn>=0.10.1
+monai>=1.2.0
 
-# Core Scientific Computing & Math
-# Pinning numpy < 2.0.0 to prevent C-extension ABI breakage with antspyx / SimpleITK compiled wheels
-numpy>=1.24.0,<2.0.0
-scipy>=1.10.0
-pandas>=2.0.0
-scikit-learn>=1.2.0
-
-# Visualization & Utilities
-matplotlib>=3.7.0
-pillow>=9.5.0
-h5py>=3.8.0
+# DICOM / NIfTI I/O Helpers
+pydicom>=2.4.0
+nibabel>=5.0.0
