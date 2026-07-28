@@ -10,5 +10,8 @@ nilearn>=0.14.0
 torch>=2.0.0
 numpy>=1.24.0
 
+#Git repos
+git+https://github.com/MIC-DKFZ/HD-BET.git
+
 # Utilities
 python-dotenv>=1.0.0
