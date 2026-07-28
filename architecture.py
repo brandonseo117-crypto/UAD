@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import einops
+from einops import rearrange
 
 class GatedSpatialConv3d(nn.Module): #good
     def __init__(self, channels):
@@ -168,7 +168,7 @@ class DualDomainLoss(nn.Module):
         # 2. Feature-space cosine distance
         l_feat = 0.0
         # Correctly matches e1 with d1 (base_dim) and e2 with d2 (base_dim*2)
-        for f_e, f_d in zip(enc_feats, dec_feats):
+        for f_e, f_d in zip(enc_feats[:2], dec_feats):
             sim = self.cosine(f_e, f_d).mean()
             l_feat += (1.0 - sim)
 
