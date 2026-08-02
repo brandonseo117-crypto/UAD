@@ -64,7 +64,7 @@ def tensor_to_nifti(tensor: torch.Tensor, output_path: str, affine: np.ndarray =
     print(f" Saved NIfTI file to: {output_path}")
 
 if __name__ == "__main__":
-    patient_directory = Path(r'"C:\Users\Owner\Downloads\output_niftis"') 
+    patient_directory = Path(r'mock') 
     
     output_directory = Path('processed_tensors') 
     output_directory.mkdir(parents=True, exist_ok=True)
