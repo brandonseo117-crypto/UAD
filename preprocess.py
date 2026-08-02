@@ -53,20 +53,18 @@ def tensor_to_nifti(tensor: torch.Tensor, output_path: str, affine: np.ndarray =
     """
     Converts a 5D PyTorch tensor (1, 1, Depth, Height, Width) back to a .nii.gz file.
     """
-    # 1. Remove batch and channel dimensions -> shape becomes (128, 128, 128)
+    # remove dims and put on cpu
     array_3d = tensor.squeeze().detach().cpu().numpy()
     
-    # 2. Use identity matrix if no specific spatial affine is provided
     if affine is None:
         affine = np.eye(4)
         
-    # 3. Create NIfTI image and save to disk
     nifti_img = nib.Nifti1Image(array_3d, affine=affine)
     nib.save(nifti_img, output_path)
     print(f" Saved NIfTI file to: {output_path}")
 
 if __name__ == "__main__":
-    patient_directory = Path(r'input_here') 
+    patient_directory = Path(r'"C:\Users\Owner\Downloads\output_niftis"') 
     
     output_directory = Path('processed_tensors') 
     output_directory.mkdir(parents=True, exist_ok=True)
