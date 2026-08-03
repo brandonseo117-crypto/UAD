@@ -67,9 +67,9 @@ def convert_adni_to_flat_nii(input_adni_dir, output_nii_dir):
 if __name__ == "__main__":
     # Change this to the path where your raw downloaded ADNI directory lives
     # It can be a relative path or an absolute path (e.g., "C:/Users/.../Downloads/ADNI")
-    in_root = r"C:\Users\Owner\Downloads\train1\ADNI"
+    in_root = r"C:\Users\Owner\Downloads\test_set_cn1_dataset\ADNI"
     
     # The name of the flat folder that will be automatically built inside your project folder
-    out_root = "output_niftis"
+    out_root = "output_niftis_cn_test"
     
     convert_adni_to_flat_nii(in_root, out_root)

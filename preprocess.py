@@ -27,7 +27,7 @@ def preprocess(nifti_file, target_shape=(128, 128, 128)):
     normalized_img = reg['warpedmovout']
 
     # Convert ANTs image to TorchIO ScalarImage
-    nib_img = ants.utils.to_nibabel_nifti(normalized_img)  # Convert to nibabel format for TorchIO compatibility
+    nib_img = ants.to_nibabel_nifti(normalized_img)  # Convert to nibabel format for TorchIO compatibility
     torchio_scalar_img = tio.ScalarImage(
         tensor=torch.from_numpy(nib_img.get_fdata(dtype=np.float32)).unsqueeze(0),
         affine=nib_img.affine
@@ -41,13 +41,16 @@ def preprocess(nifti_file, target_shape=(128, 128, 128)):
     ])
 
     processed_subject = transforms(torchio_scalar_img)
-
-    # Explicitly zero out background voxels
     processed_tensor = processed_subject.data
-    processed_tensor = torch.where(processed_tensor > processed_tensor.min(), processed_tensor, torch.tensor(0.0))  # Ensure background is zeroed out
+    processed_affine = processed_subject.affine
+
+    processed_tensor = torch.where(processed_tensor > (processed_tensor.min() + 1e-4), 
+                                   processed_tensor, 
+                                   torch.tensor(0.0)
+                                   )
 
     processed_tensor = processed_tensor.unsqueeze(0).float()
-    return processed_tensor
+    return processed_tensor, processed_affine
 
 def tensor_to_nifti(tensor: torch.Tensor, output_path: str, affine: np.ndarray = None):
     """
@@ -64,8 +67,8 @@ def tensor_to_nifti(tensor: torch.Tensor, output_path: str, affine: np.ndarray =
     print(f" Saved NIfTI file to: {output_path}")
 
 if __name__ == "__main__":
-    patient_directory = Path(r'mock') 
-    
+    patient_directory = Path(r"C:\Users\Owner\Downloads\output_niftis_cn_test") 
+    ants_temp = ants.image_read('mni152_template_1mm.nii.gz')
     output_directory = Path('processed_tensors') 
     output_directory.mkdir(parents=True, exist_ok=True)
     
