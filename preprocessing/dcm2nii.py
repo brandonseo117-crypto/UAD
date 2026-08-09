@@ -36,7 +36,7 @@ def convert_adni_to_flat_nii(input_adni_dir, output_nii_dir):
     # %t = Time/Date of scan
     # %i = Image ID (Unique identifier number from ADNI)
     # Resulting name example: 002_S_0295_MPRAGE_20261108143022_I123456.nii.gz
-    naming_format = "%n_%d_%t_I%i"
+    naming_format = "%n_%d_%t"
     
     for idx, dcm_dir in enumerate(dicom_folders, 1):
         print(f"[{idx}/{len(dicom_folders)}] Converting: {dcm_dir.relative_to(input_path)}")
