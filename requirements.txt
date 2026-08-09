@@ -11,6 +11,7 @@ antspynet
 torch>=2.0.0
 torchvision
 numpy>=1.24.0
+monai
 
 # Utilities
 python-dotenv>=1.0.0
