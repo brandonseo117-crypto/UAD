@@ -1,3 +1,4 @@
 .env
 processed_tensors
 run.py
+__pycache__/
