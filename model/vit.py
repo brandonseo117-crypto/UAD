@@ -1,7 +1,8 @@
 import torch
+from torch.optim import Adam
 import torch.nn as nn
 
-class ViTAutoencoder(nn.Module):
+class ViTAutoEncoder(nn.Module):
     def __init__(self, in_channels=1, img_size=(128,128,128), patch_size=(16, 16, 16), embed_dim=768, num_heads=12, depth=6):
         super().__init__()
         self.patch_size = patch_size
@@ -74,3 +75,26 @@ class ViTAutoencoder(nn.Module):
         dec_grid = dec_tokens.view(x.shape[0], self.embed_dim, self.grid_size[0], self.grid_size[1], self.grid_size[2])
         reconstructed_img = self.decoder_conv(dec_grid)
         return reconstructed_img, mu, logvar
+
+#loop
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
+model = ViTAutoEncoder().to(device)
+model.train()
+optimizer = Adam(model.parameters(), lr=1e-3)
+epochs = 5
+
+#pretend we have a dataloader called 'train_loader'
+for epoch in range(epochs):
+    running_loss = 0.0
+    for idx, input in enumerate(train_loader):
+        optimizer.zero_grad()
+        input = input.to(device)
+        loss = model.compute_loss(input)
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item()
+
+    avg_loss = running_loss / len(train_loader)
+    print(f"Epoch [{epoch+1}/{epochs}], avg loss: {avg_loss:.4f}")
