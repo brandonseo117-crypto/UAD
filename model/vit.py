@@ -57,10 +57,10 @@ class ViTAutoencoder(nn.Module):
         return mu + eps * std
 
     def compute_loss(self, x, beta=1e-3):
-        recon_x, mu, logvar = self.forward(x)
-        recon_loss = torch.nn.functional.mse_loss(recon_x, x, reduction='mean')
-        kld_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
-        return recon_loss + (beta * kld_loss)
+            recon_x, mu, logvar = self.forward(x)
+            recon_loss = torch.nn.functional.mse_loss(recon_x, x)
+            kld_loss = torch.mean(-0.5 * torch.sum(1 + logvar - mu**2 - logvar.exp(), dim=(1,2)))
+            return recon_loss + (beta * kld_loss)
 
     def forward(self, x):
         tokens = self.patching_input(x)
@@ -74,9 +74,3 @@ class ViTAutoencoder(nn.Module):
         dec_grid = dec_tokens.view(x.shape[0], self.embed_dim, self.grid_size[0], self.grid_size[1], self.grid_size[2])
         reconstructed_img = self.decoder_conv(dec_grid)
         return reconstructed_img, mu, logvar
-        
-    
-
-    
-
-
