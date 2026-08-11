@@ -14,35 +14,42 @@ class VAEModel(torch.nn.Module):
             out_channels=input_shape[0],
             latent_size=latent_dim,
             channels=(64, 128, 256),
-            strides = (2,2),
+            strides = (2,2,2),
             num_res_units=2
         )
 
     def forward(self, x):
         return self.vae(x)
 
-    def compute_loss(self, x):
+    def compute_loss(self, x, beta=1e-3):
         recon_x, mu, logvar = self.forward(x)
-        recon_loss = torch.nn.functional.mse_loss(recon_x, x, reduction='sum')
-        kld_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-        return (recon_loss + kld_loss)
+        recon_loss = torch.nn.functional.mse_loss(recon_x, x, reduction='mean')
+        kld_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+        return recon_loss + (beta * kld_loss)
 
     def anomaly_mapping(self, x):
         recon_x, _, _ = self.forward(x)
         return torch.abs(x - recon_x), recon_x 
 
 #loop
-model = VAEModel(input_shape=(1, 128, 128, 128), latent_dim=256)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
+model = VAEModel(input_shape=(1, 128, 128, 128), latent_dim=256).to(device)
 model.train()
 optimizer = Adam(model.parameters(), lr=1e-3)
 epochs = 5
 
 #pretend we have a dataloader called 'train_loader'
 for epoch in range(epochs):
-    for batch in train_loader:
-        loss = model.compute_loss(batch)
+    running_loss = 0.0
+    for idx, input in enumerate(train_loader):
         optimizer.zero_grad()
+        input = input.to(device)
+        loss = model.compute_loss(input)
         loss.backward()
         optimizer.step()
 
-        print(f"Epoch [{epoch+1}/{epochs}], Loss: {loss.item():.4f}")
+        running_loss += loss.item()
+
+    avg_loss = running_loss / len(train_loader)
+    print(f"Epoch [{epoch+1}/{epochs}], avg loss: {avg_loss:.4f}")
