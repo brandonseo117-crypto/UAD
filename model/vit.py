@@ -10,7 +10,7 @@ class ViTAutoencoder(nn.Module):
         self.in_channels = in_channels
         self.num_heads = num_heads
         self.depth = depth
-
+        self.grid_size = (img_size[0] // patch_size[0], img_size[1] // patch_size[1], img_size[2] // patch_size[2])
         self.num_patches = (
             (img_size[0] // patch_size[0]) * 
             (img_size[1] // patch_size[1]) * 
@@ -35,17 +35,45 @@ class ViTAutoencoder(nn.Module):
         )
 
         self.transformer_encoder = nn.TransformerEncoder(self.encoder, num_layers=depth)
+
+        self.fc_mu = nn.Linear(self.embed_dim, self.embed_dim)
+        self.fc_logvar = nn.Linear(self.embed_dim, self.embed_dim)
+        self.decoder_linear = nn.Linear(self.embed_dim, self.embed_dim)
+
+        self.decoder_conv = nn.ConvTranspose3d(
+            in_channels=self.embed_dim,
+            out_channels=self.in_channels,
+            kernel_size=self.patch_size,
+            stride=self.patch_size
+        )
+    
     def patching_input(self, x):
         conv_out = self.patchification(x)
         return conv_out.flatten(2, -1).transpose(1,2)
+
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+
+    def compute_loss(self, x, beta=1e-3):
+        recon_x, mu, logvar = self.forward(x)
+        recon_loss = torch.nn.functional.mse_loss(recon_x, x, reduction='mean')
+        kld_loss = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+        return recon_loss + (beta * kld_loss)
 
     def forward(self, x):
         tokens = self.patching_input(x)
         tokens = tokens + self.pos_embedding
         encoded_tokens = self.transformer_encoder(tokens)
-
-
-        return encoded_tokens
+        mu = self.fc_mu(encoded_tokens)
+        logvar = self.fc_logvar(encoded_tokens)
+        z = self.reparameterize(mu, logvar)
+        dec_tokens = self.decoder_linear(z)
+        dec_tokens = dec_tokens.transpose(1,2)
+        dec_grid = dec_tokens.view(x.shape[0], self.embed_dim, self.grid_size[0], self.grid_size[1], self.grid_size[2])
+        reconstructed_img = self.decoder_conv(dec_grid)
+        return reconstructed_img, mu, logvar
         
     
 
