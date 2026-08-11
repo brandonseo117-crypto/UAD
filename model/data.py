@@ -1,7 +1,8 @@
 import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
-import torchvision.datasets import ImageFolder
+from torchvision import datasets
+
 class MRITrainDataset(Dataset):
     def __init__(self, img_dir)
         self.img_dir = img_dir
@@ -13,8 +14,8 @@ class MRITrainDataset(Dataset):
         x_tensor = metadata['tensor']
         return x_tensor
 
-train_loader = DataLoader(MRITrainDataset(img_dir), batch_size=1, shuffle=True)
+test_dataset = datasets.ImageFolder('dataset_path')
+train_dataset = MRITrainDataset(img_dir='sample_path')
 
-test_dataset = ImageFolder(root='path/to/test_data', transform=None)
-
-
+train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
