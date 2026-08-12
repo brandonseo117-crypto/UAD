@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 from einops import rearrange
+from torch.optim import Adam
+from data import train_loader
+from mamba_ssm import Mamba
 
 class GatedSpatialConv3d(nn.Module): #good
     def __init__(self, channels):
@@ -173,3 +176,26 @@ class DualDomainLoss(nn.Module):
             l_feat += (1.0 - sim)
 
         return self.alpha * l_feat + self.beta * l_data
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
+model = MambaUAD()
+optimizer = Adam(model.parameters(), lr=1e-4)
+criterion = DualDomainLoss(alpha=1, beta=0.4)
+epochs = 5
+
+for epoch in range(epochs):
+    running_loss = 0.0
+    for idx, input in enumerate(train_loader):
+        input = input.to(device
+                         )
+        optimizer.zero_grad()
+        output, encs, decs = model(input)
+        loss = criterion(input_vol=output, target_vol=input, enc_feats=encs, dec_feats=decs)
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item()
+
+    avg_loss = running_loss / len(train_loader)
+    print(f"Epoch [{epoch+1}/{epochs}], avg loss: {avg_loss:.4f}")

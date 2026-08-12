@@ -1,6 +1,7 @@
 import torch
 from torch.optim import Adam
 import torch.nn as nn
+from data import train_loader
 
 class ViTAutoEncoder(nn.Module):
     def __init__(self, in_channels=1, img_size=(128,128,128), patch_size=(16, 16, 16), embed_dim=768, num_heads=12, depth=6):

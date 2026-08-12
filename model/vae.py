@@ -1,6 +1,7 @@
 import torch
 from torch.optim import Adam
 from monai.networks.nets import VarAutoEncoder
+from data import train_loader
 
 class VAEModel(torch.nn.Module):
     def __init__(self, input_shape=(1, 128, 128, 128), latent_dim=256):
