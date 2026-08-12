@@ -1,7 +1,7 @@
 from data import test_loader
 from vae import VAEModel
 from vit import ViTVAE
-from architecture import GatedSpatialConv3d, TSMambaBlock, TriOrientatedMamba, MambaUAD
+from architecture import GatedSpatialConv3d, TSMambaBlock, TriOrientatedMamba, MambaUAD, DualDomainLoss
 import torch
 from torchmetrics.image import PeakSignalNoiseRatio
 
@@ -11,14 +11,17 @@ print(device)
 mamba_model = MambaUAD()
 mamba_state_dict = torch.load('mamba_weights.pth', weights_only=True)
 mamba_model.load_state_dict(mamba_state_dict)
+mamba_model.eval()
 
 vae_model = VAEModel().to(device)
 vae_state_dict = torch.load('vae_weights.pth', weights_only=True)
 vae_model.load_state_dict(vae_state_dict)
+vae_model.eval()
 
 vitvae_model = ViTVAE().to(device)
 vitvae_state_dict = torch.load('vit_weights.pth', weights_only=True)
 vitvae_model.load_state_dict(vitvae_state_dict)
+vitvae_model.eval()
 
 # VAEs
 vae_loss_vals = []
@@ -37,12 +40,14 @@ for i in range(2):
     avg_loss = running_loss / len(test_loader)
     print(f"Avg: {avg_loss}:.4f")
 
+
 # Mamba
+criterion = DualDomainLoss(alpha=1, beta=0.4)
 mamba_loss_vals = []
 for idx, input_data in enumerate(test_loader):
     input_data = input_data.to(device)
-    loss = mamba_model.compute_loss(input_data)
-      
+    output, encs, decs = model(input_data)
+    loss = criterion(input_vol=output, target_vol=input_data, enc_feats=encs, dec_feats=decs)
     running_loss += loss.item()
     mamba_loss_vals.append(loss.item())
 
