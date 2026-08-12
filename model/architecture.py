@@ -177,25 +177,29 @@ class DualDomainLoss(nn.Module):
 
         return self.alpha * l_feat + self.beta * l_data
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(device)
-model = MambaUAD()
-optimizer = Adam(model.parameters(), lr=1e-4)
-criterion = DualDomainLoss(alpha=1, beta=0.4)
-epochs = 5
+if __name__ == "__main__":
+    #loop
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(device)
+    model = MambaUAD()
+    optimizer = Adam(model.parameters(), lr=1e-4)
+    criterion = DualDomainLoss(alpha=1, beta=0.4)
+    epochs = 5
 
-for epoch in range(epochs):
-    running_loss = 0.0
-    for idx, input in enumerate(train_loader):
-        input = input.to(device
-                         )
-        optimizer.zero_grad()
-        output, encs, decs = model(input)
-        loss = criterion(input_vol=output, target_vol=input, enc_feats=encs, dec_feats=decs)
-        loss.backward()
-        optimizer.step()
+    for epoch in range(epochs):
+        running_loss = 0.0
+        for idx, input_data in enumerate(train_loader):
+            input_data = input_data.to(device
+                            )
+            optimizer.zero_grad()
+            output, encs, decs = model(input_data)
+            loss = criterion(input_vol=output, target_vol=input_data, enc_feats=encs, dec_feats=decs)
+            loss.backward()
+            optimizer.step()
 
-        running_loss += loss.item()
+            running_loss += loss.item()
 
-    avg_loss = running_loss / len(train_loader)
-    print(f"Epoch [{epoch+1}/{epochs}], avg loss: {avg_loss:.4f}")
+        avg_loss = running_loss / len(train_loader)
+        print(f"Epoch [{epoch+1}/{epochs}], avg loss: {avg_loss:.4f}")
+
+    torch.save(model.state_dict(), 'mamba_weights.pth')

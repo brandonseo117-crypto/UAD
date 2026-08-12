@@ -32,25 +32,28 @@ class VAEModel(torch.nn.Module):
         recon_x, _, _ = self.forward(x)
         return torch.abs(x - recon_x), recon_x 
 
-#loop
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(device)
-model = VAEModel(input_shape=(1, 128, 128, 128), latent_dim=256).to(device)
-model.train()
-optimizer = Adam(model.parameters(), lr=1e-3)
-epochs = 5
+if __name__ == "__main__":
+    #loop
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(device)
+    model = VAEModel(input_shape=(1, 128, 128, 128), latent_dim=256).to(device)
+    model.train()
+    optimizer = Adam(model.parameters(), lr=1e-3)
+    epochs = 5
 
-#pretend we have a dataloader called 'train_loader'
-for epoch in range(epochs):
-    running_loss = 0.0
-    for idx, input in enumerate(train_loader):
-        optimizer.zero_grad()
-        input = input.to(device)
-        loss = model.compute_loss(input)
-        loss.backward()
-        optimizer.step()
+    #pretend we have a dataloader called 'train_loader'
+    for epoch in range(epochs):
+        running_loss = 0.0
+        for idx, input_data in enumerate(train_loader):
+            optimizer.zero_grad()
+            input_data = input_data.to(device)
+            loss = model.compute_loss(input_data)
+            loss.backward()
+            optimizer.step()
 
-        running_loss += loss.item()
+            running_loss += loss.item()
 
-    avg_loss = running_loss / len(train_loader)
-    print(f"Epoch [{epoch+1}/{epochs}], avg loss: {avg_loss:.4f}")
+        avg_loss = running_loss / len(train_loader)
+        print(f"Epoch [{epoch+1}/{epochs}], avg loss: {avg_loss:.4f}")
+
+    torch.save(model.state_dict(), 'vae_weights.pth')
