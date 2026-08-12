@@ -3,6 +3,7 @@ from vae import VAEModel
 from vit import ViTVAE
 from architecture import GatedSpatialConv3d, TSMambaBlock, TriOrientatedMamba, MambaUAD
 import torch
+from torchmetrics.image import PeakSignalNoiseRatio
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
@@ -23,12 +24,14 @@ vitvae_model.load_state_dict(vitvae_state_dict)
 vae_loss_vals = []
 vitvae_loss_vals = []
 for i in range(2):
+    running_loss = 0.0
     for idx, input_data in enumerate(test_loader):
         input_data = input_data.to(device)
         model = vitvae_model if len(vae_loss_vals) == len(test_loader.dataset) else vae_model
         loss = model.compute_loss(input_data)
 
         running_loss += loss.item()
+        loss_vals = vitvae_loss_vals if len(vae_loss_vals) == len(test_loader.dataset) else vae_loss_vals
         loss_vals.append(loss.item())
 
     avg_loss = running_loss / len(test_loader)
@@ -38,7 +41,7 @@ for i in range(2):
 mamba_loss_vals = []
 for idx, input_data in enumerate(test_loader):
     input_data = input_data.to(device)
-    loss = model.compute_loss(input_data)
+    loss = mamba_model.compute_loss(input_data)
       
     running_loss += loss.item()
     mamba_loss_vals.append(loss.item())

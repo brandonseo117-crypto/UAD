@@ -4,6 +4,7 @@ from einops import rearrange
 from torch.optim import Adam
 from data import train_loader
 from mamba_ssm import Mamba
+from torchmetrics.image import PeakSignalNoiseRatio
 
 class GatedSpatialConv3d(nn.Module): #good
     def __init__(self, channels):
