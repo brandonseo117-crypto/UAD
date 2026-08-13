@@ -33,8 +33,8 @@ class MRITestDataset(Dataset): # has labels but aren't directly used in inferenc
         label = self.labels[payload_path.parent.name]
         metadata = torch.load(payload_path)
         x_tensor = metadata['tensor']
-        vis_date = metadata['vis_date']
-        pt_id = metadata['pt_id']
+        vis_date = metadata['scan_date']
+        pt_id = metadata['ptid']
 
         return x_tensor, label, vis_date, pt_id
 
