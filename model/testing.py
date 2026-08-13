@@ -1,4 +1,4 @@
-from data import test_loader
+from dataset import test_loader
 from vae import VAEModel
 from vit import ViTVAE
 from architecture import GatedSpatialConv3d, TSMambaBlock, TriOrientatedMamba, MambaUAD, DualDomainLoss
@@ -28,7 +28,7 @@ vae_loss_vals = []
 vitvae_loss_vals = []
 for i in range(2):
     running_loss = 0.0
-    for idx, input_data in enumerate(test_loader):
+    for idx, (input_data, label, vis_date, pt_id) in enumerate(test_loader):
         input_data = input_data.to(device)
         model = vitvae_model if len(vae_loss_vals) == len(test_loader.dataset) else vae_model
         loss = model.compute_loss(input_data)
@@ -44,7 +44,7 @@ for i in range(2):
 # Mamba
 criterion = DualDomainLoss(alpha=1, beta=0.4)
 mamba_loss_vals = []
-for idx, input_data in enumerate(test_loader):
+for idx, (input_data, label, vis_date, pt_id) in enumerate(test_loader):
     input_data = input_data.to(device)
     output, encs, decs = model(input_data)
     loss = criterion(input_vol=output, target_vol=input_data, enc_feats=encs, dec_feats=decs)

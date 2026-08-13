@@ -2,9 +2,11 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 from torch.optim import Adam
-from data import train_loader
+from dataset import train_loader
 from mamba_ssm import Mamba
 from torchmetrics.image import PeakSignalNoiseRatio
+import time
+import matplotlib.pyplot as plt
 
 class GatedSpatialConv3d(nn.Module): #good
     def __init__(self, channels):
@@ -182,25 +184,43 @@ if __name__ == "__main__":
     #loop
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
-    model = MambaUAD()
+    model = MambaUAD().to(device)
     optimizer = Adam(model.parameters(), lr=1e-4)
     criterion = DualDomainLoss(alpha=1, beta=0.4)
     epochs = 5
 
+    loss_history = []
+    vram_history = []
+    timestamps = []
+
+    start_time = time.time()
+
     for epoch in range(epochs):
         running_loss = 0.0
         for idx, input_data in enumerate(train_loader):
-            input_data = input_data.to(device
-                            )
+            input_data = input_data.to(device)
             optimizer.zero_grad()
             output, encs, decs = model(input_data)
             loss = criterion(input_vol=output, target_vol=input_data, enc_feats=encs, dec_feats=decs)
             loss.backward()
             optimizer.step()
-
+            peak_vram_bytes = torch.cuda.max_memory_allocated()
+            peak_vram_mb = peak_vram_bytes / (1024 ** 2)
+            vram_history.append(peak_vram_mb)
+            timestamps.append(time.time() - start_time)
+            loss_history.append(loss.item())
+            print(peak_vram_mb)
             running_loss += loss.item()
+            torch.cuda.reset_peak_memory_stats()
 
         avg_loss = running_loss / len(train_loader)
         print(f"Epoch [{epoch+1}/{epochs}], avg loss: {avg_loss:.4f}")
 
     torch.save(model.state_dict(), 'mamba_weights.pth')
+
+    plt.plot(timestamps, vram_history, color='blue', linewidth=2)
+    plt.title('VRAM Usage Over Time')
+    plt.xlabel('Time (seconds)')
+    plt.ylabel('VRAM Allocated (MB)')
+    plt.grid(True)
+    plt.show()

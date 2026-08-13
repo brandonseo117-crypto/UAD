@@ -1,8 +1,10 @@
 import torch
 from torch.optim import Adam
 from monai.networks.nets import VarAutoEncoder
-from data import train_loader
+from dataset import train_loader
 from torchmetrics.image import PeakSignalNoiseRatio
+import time
+import matplotlib.pyplot as plt
 
 class VAEModel(torch.nn.Module):
     def __init__(self, input_shape=(1, 128, 128, 128), latent_dim=256):
@@ -41,7 +43,9 @@ if __name__ == "__main__":
     model.train()
     optimizer = Adam(model.parameters(), lr=1e-3)
     epochs = 5
-
+    vram_history = []
+    timestamps = []
+    start_time = time.time()
     #pretend we have a dataloader called 'train_loader'
     for epoch in range(epochs):
         running_loss = 0.0
@@ -52,9 +56,23 @@ if __name__ == "__main__":
             loss.backward()
             optimizer.step()
 
+            peak_vram_bytes = torch.cuda.max_memory_allocated()
+            peak_vram_mb = peak_vram_bytes / (1024**2)
+            vram_history.append(peak_vram_mb)
+            timestamps.append(time.time() - start_time)
+            
             running_loss += loss.item()
+
+            torch.cuda.reset_peak_memory_stats()
 
         avg_loss = running_loss / len(train_loader)
         print(f"Epoch [{epoch+1}/{epochs}], avg loss: {avg_loss:.4f}")
 
     torch.save(model.state_dict(), 'vae_weights.pth')
+
+    plt.plot(timestamps, vram_history, color='blue', linewidth=2)
+    plt.title('VRAM Usage Over Time')
+    plt.xlabel('Time (seconds)')
+    plt.ylabel('VRAM Allocated (MB)')
+    plt.grid(True)
+    plt.show()

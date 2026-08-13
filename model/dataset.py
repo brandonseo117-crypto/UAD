@@ -10,7 +10,7 @@ class MRITrainDataset(Dataset): # unlabeled for unsupervised anomaly detection
         return len(self.img_paths)
     def __getitem__(self, idx):
         img_path = self.img_paths[idx]
-        metadata = torch.load(img_path)
+        metadata = torch.load(img_path, weights_only=True)
         x_tensor = metadata['tensor']
         return x_tensor
 
@@ -31,7 +31,7 @@ class MRITestDataset(Dataset): # has labels but aren't directly used in inferenc
     def __getitem__(self, idx):
         payload_path = self.payload_paths[idx]
         label = self.labels[payload_path.parent.name]
-        metadata = torch.load(payload_path)
+        metadata = torch.load(payload_path, weights_only=False)
         x_tensor = metadata['tensor']
         vis_date = metadata['scan_date']
         pt_id = metadata['ptid']
