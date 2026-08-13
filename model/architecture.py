@@ -184,13 +184,17 @@ if __name__ == "__main__":
     #loop
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
+
     model = MambaUAD().to(device)
     optimizer = Adam(model.parameters(), lr=1e-4)
     criterion = DualDomainLoss(alpha=1, beta=0.4)
     epochs = 5
 
+    calculate_psnr = PeakSignalNoiseRatio(data_range=None).to(device)
+
     loss_history = []
     vram_history = []
+    psnr_history = []
     timestamps = []
 
     start_time = time.time()
@@ -208,6 +212,7 @@ if __name__ == "__main__":
             peak_vram_mb = peak_vram_bytes / (1024 ** 2)
             vram_history.append(peak_vram_mb)
             timestamps.append(time.time() - start_time)
+            psnr_history.append(calculate_psnr(output, input_data).item())
             loss_history.append(loss.item())
             print(peak_vram_mb)
             running_loss += loss.item()
@@ -218,9 +223,21 @@ if __name__ == "__main__":
 
     torch.save(model.state_dict(), 'mamba_weights.pth')
 
+    plt.figure(1)
     plt.plot(timestamps, vram_history, color='blue', linewidth=2)
     plt.title('VRAM Usage Over Time')
     plt.xlabel('Time (seconds)')
     plt.ylabel('VRAM Allocated (MB)')
     plt.grid(True)
-    plt.show()
+    plt.savefig('figures/mamba_vram_usage.svg', format='svg')
+    plt.close()
+
+    plt.figure(2)
+    plt.plot(range(len(loss_history)), loss_history, color='blue', linewidth=2)
+    plt.plot(range(len(loss_history)), psnr_history, color='blue', linewidth=2)
+    plt.title('Training loss and PSNR over time')
+    plt.xlabel('Batches (batch size = 1)')
+    plt.ylabel('Loss')
+    plt.grid(True)
+    plt.savefig('figures/mamba_convergence.svg', format='svg')
+    plt.close()

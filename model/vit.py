@@ -89,8 +89,11 @@ if __name__ == "__main__":
     model.train()
     optimizer = Adam(model.parameters(), lr=1e-3)
     epochs = 5
+
     vram_history = []
+    loss_history = []
     timestamps = []
+
     start_time = time.time()
     #pretend we have a dataloader called 'train_loader'
     for epoch in range(epochs):
@@ -104,6 +107,7 @@ if __name__ == "__main__":
             peak_vram_bytes = torch.cuda.max_memory_allocated()
             peak_vram_mb = peak_vram_bytes / (1024**2)
             vram_history.append(peak_vram_mb)
+            loss_history.append(loss.item())
             timestamps.append(time.time() - start_time)
             print(peak_vram_mb)
             running_loss += loss.item()
@@ -115,9 +119,20 @@ if __name__ == "__main__":
 
     torch.save(model.state_dict(), 'vit_weights.pth')
 
+    plt.figure(1)
     plt.plot(timestamps, vram_history, color='blue', linewidth=2)
     plt.title('VRAM Usage Over Time')
     plt.xlabel('Time (seconds)')
     plt.ylabel('VRAM Allocated (MB)')
     plt.grid(True)
-    plt.show()
+    plt.savefig('figures/vit_vram_usage.svg', format='svg')
+    plt.close()
+
+    plt.figure(2)
+    plt.plot(range(len(loss_history)), loss_history, color='blue', linewidth=2)
+    plt.title('Training loss and PSNR over time')
+    plt.xlabel('Batches (batch size = 1)')
+    plt.ylabel('Loss')
+    plt.grid(True)
+    plt.savefig('figures/vit_convergence.svg', format='svg')
+    plt.close()
