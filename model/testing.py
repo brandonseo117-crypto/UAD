@@ -26,16 +26,18 @@ vitvae_model.eval()
 # VAEs
 vae_loss_vals = []
 vitvae_loss_vals = []
+
 for i in range(2):
     running_loss = 0.0
-    for idx, (input_data, label, vis_date, pt_id) in enumerate(test_loader):
-        input_data = input_data.to(device)
-        model = vitvae_model if len(vae_loss_vals) == len(test_loader.dataset) else vae_model
-        loss = model.compute_loss(input_data)
+    with torch.no_grad():
+        for idx, (input_data, label, vis_date, pt_id) in enumerate(test_loader):
+            input_data = input_data.to(device)
+            model = vitvae_model if len(vae_loss_vals) == len(test_loader.dataset) else vae_model
+            loss = model.compute_loss(input_data)
 
-        running_loss += loss.item()
-        loss_vals = vitvae_loss_vals if len(vae_loss_vals) == len(test_loader.dataset) else vae_loss_vals
-        loss_vals.append(loss.item())
+            running_loss += loss.item()
+            loss_vals = vitvae_loss_vals if len(vae_loss_vals) == len(test_loader.dataset) else vae_loss_vals
+            loss_vals.append(loss.item())
 
     avg_loss = running_loss / len(test_loader)
     print(f"Avg: {avg_loss}:.4f")
@@ -44,12 +46,14 @@ for i in range(2):
 # Mamba
 criterion = DualDomainLoss(alpha=1, beta=0.4)
 mamba_loss_vals = []
-for idx, (input_data, label, vis_date, pt_id) in enumerate(test_loader):
-    input_data = input_data.to(device)
-    output, encs, decs = model(input_data)
-    loss = criterion(input_vol=output, target_vol=input_data, enc_feats=encs, dec_feats=decs)
-    running_loss += loss.item()
-    mamba_loss_vals.append(loss.item())
+
+with torch.no_grad():
+    for idx, (input_data, label, vis_date, pt_id) in enumerate(test_loader):
+        input_data = input_data.to(device)
+        output, encs, decs = model(input_data)
+        loss = criterion(input_vol=output, target_vol=input_data, enc_feats=encs, dec_feats=decs)
+        running_loss += loss.item()
+        mamba_loss_vals.append(loss.item())
 
 avg_loss = running_loss / len(test_loader)
 print(f"Avg: {avg_loss}:.4f")
