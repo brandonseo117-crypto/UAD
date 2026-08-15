@@ -212,7 +212,7 @@ if __name__ == "__main__":
             peak_vram_mb = peak_vram_bytes / (1024 ** 2)
             vram_history.append(peak_vram_mb)
             timestamps.append(time.time() - start_time)
-            psnr_history.append(calculate_psnr(output, input_data).item())
+            psnr_history.append(calculate_psnr(output.detach(), input_data).item())
             loss_history.append(loss.item())
             print(peak_vram_mb)
             running_loss += loss.item()

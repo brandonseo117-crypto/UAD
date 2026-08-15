@@ -61,12 +61,6 @@ class ViTVAE(nn.Module):
         eps = torch.randn_like(std)
         return mu + eps * std
 
-    def compute_loss(self, x, beta=1e-3):
-            recon_x, mu, logvar = self.forward(x)
-            recon_loss = torch.nn.functional.mse_loss(recon_x, x)
-            kld_loss = torch.mean(-0.5 * torch.sum(1 + logvar - mu**2 - logvar.exp(), dim=(1,2)))
-            return recon_loss + (beta * kld_loss)
-
     def forward(self, x):
         tokens = self.patching_input(x)
         tokens = tokens + self.pos_embedding
@@ -80,6 +74,15 @@ class ViTVAE(nn.Module):
         reconstructed_img = self.decoder_conv(dec_grid)
         return reconstructed_img, mu, logvar
 
+class ELBOvit(nn.Module):
+    def __init__(self, beta=1e-3):
+        super().__init__()
+        self.beta = beta
+
+    def forward(self, x, recon_x, mu, logvar):
+        recon_loss = torch.nn.functional.mse_loss(recon_x, x)
+        kld_loss = torch.mean(-0.5 * torch.sum(1 + logvar - mu**2 - logvar.exp(), dim=(1,2)))
+        return recon_loss + (self.beta * kld_loss)
 
 if __name__ == "__main__":
     #loop
@@ -88,8 +91,11 @@ if __name__ == "__main__":
     model = ViTVAE().to(device)
     model.train()
     optimizer = Adam(model.parameters(), lr=1e-3)
+    criterion = ELBOvit()
     epochs = 5
+    calculate_psnr = PeakSignalNoiseRatio(data_range=None).to(device)
 
+    psnr_history = []
     vram_history = []
     loss_history = []
     timestamps = []
@@ -101,14 +107,17 @@ if __name__ == "__main__":
         for idx, input_data in enumerate(train_loader):
             optimizer.zero_grad()
             input_data = input_data.to(device)
-            loss = model.compute_loss(input_data)
+            output, mu, logvar = model(input_data)
+            loss = criterion(input_data, output, mu, logvar)
             loss.backward()
             optimizer.step()
             peak_vram_bytes = torch.cuda.max_memory_allocated()
             peak_vram_mb = peak_vram_bytes / (1024**2)
             vram_history.append(peak_vram_mb)
             loss_history.append(loss.item())
+            psnr_history.append(calculate_psnr(output.detach(), input_data).item())
             timestamps.append(time.time() - start_time)
+            
             print(peak_vram_mb)
             running_loss += loss.item()
             torch.cuda.reset_peak_memory_stats()
@@ -130,6 +139,7 @@ if __name__ == "__main__":
 
     plt.figure(2)
     plt.plot(range(len(loss_history)), loss_history, color='blue', linewidth=2)
+    plt.plot(range(len(loss_history)), psnr_history, color='green', linewidth=2)
     plt.title('Training loss and PSNR over time')
     plt.xlabel('Batches (batch size = 1)')
     plt.ylabel('Loss')

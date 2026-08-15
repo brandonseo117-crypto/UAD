@@ -1,7 +1,7 @@
 from dataset import test_loader
-from vae import VAEModel
-from vit import ViTVAE
-from architecture import GatedSpatialConv3d, TSMambaBlock, TriOrientatedMamba, MambaUAD, DualDomainLoss
+from vae import VAEModel, ELBOvae
+from vit import ViTVAE, ELBOvit
+from architecture import MambaUAD, DualDomainLoss
 import torch
 from torchmetrics.image import PeakSignalNoiseRatio
 
@@ -28,12 +28,14 @@ vae_loss_vals = []
 vitvae_loss_vals = []
 
 for i in range(2):
+    criterion = ELBOvit() if len(vae_loss_vals) == len(test_loader.dataset) else ELBOvae()
     running_loss = 0.0
     with torch.no_grad():
         for idx, (input_data, label, vis_date, pt_id) in enumerate(test_loader):
             input_data = input_data.to(device)
             model = vitvae_model if len(vae_loss_vals) == len(test_loader.dataset) else vae_model
-            loss = model.compute_loss(input_data)
+            output, mu, logvar = model(input_data)
+            loss = criterion(mu, logvar)
 
             running_loss += loss.item()
             loss_vals = vitvae_loss_vals if len(vae_loss_vals) == len(test_loader.dataset) else vae_loss_vals

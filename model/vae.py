@@ -14,7 +14,7 @@ class VAEModel(torch.nn.Module):
 
         self.vae = VarAutoEncoder(
             spatial_dims=3,
-            in_channels=input_shape[0],
+            in_shape=input_shape,
             out_channels=input_shape[0],
             latent_size=latent_dim,
             channels=(64, 128, 256),
@@ -25,15 +25,19 @@ class VAEModel(torch.nn.Module):
     def forward(self, x):
         return self.vae(x)
 
-    def compute_loss(self, x, beta=1e-3):
-        recon_x, mu, logvar = self.forward(x)
-        recon_loss = torch.nn.functional.mse_loss(recon_x, x)
-        kld_loss = torch.mean(-0.5 * torch.sum(1 + logvar - mu**2 - logvar.exp(), dim=(1,2)))
-        return recon_loss + (beta * kld_loss)
-
     def anomaly_mapping(self, x):
-        recon_x, _, _ = self.forward(x)
+        recon_x, _, _, _ = self.forward(x)
         return torch.abs(x - recon_x), recon_x 
+
+class ELBOvae(torch.nn.Module):
+    def __init__(self, beta=1e-3):
+        super().__init__()
+        self.beta = beta
+
+    def forward(self, x, recon_x, mu, logvar):
+        recon_loss = torch.nn.functional.mse_loss(recon_x, x)
+        kld_loss = torch.mean(-0.5 * torch.sum(1 + logvar - mu**2 - logvar.exp(), dim=1))
+        return recon_loss + (self.beta * kld_loss)
 
 if __name__ == "__main__":
     #loop
@@ -42,8 +46,12 @@ if __name__ == "__main__":
     model = VAEModel(input_shape=(1, 128, 128, 128), latent_dim=256).to(device)
     model.train()
     optimizer = Adam(model.parameters(), lr=1e-3)
+    criterion = ELBOvae()
     epochs = 5
 
+    calculate_psnr = PeakSignalNoiseRatio(data_range=None).to(device)
+
+    psnr_history = []
     vram_history = []
     loss_history =[]
     timestamps = []
@@ -55,13 +63,15 @@ if __name__ == "__main__":
         for idx, input_data in enumerate(train_loader):
             optimizer.zero_grad()
             input_data = input_data.to(device)
-            loss = model.compute_loss(input_data)
+            output, mu, logvar, _ = model(input_data)
+            loss = criterion(input_data, output, mu, logvar)
             loss.backward()
             optimizer.step()
 
             peak_vram_bytes = torch.cuda.max_memory_allocated()
             peak_vram_mb = peak_vram_bytes / (1024**2)
             vram_history.append(peak_vram_mb)
+            psnr_history.append(calculate_psnr(output.detach(), input_data).item())
             loss_history.append(loss.item())
 
             timestamps.append(time.time() - start_time)
@@ -86,6 +96,7 @@ if __name__ == "__main__":
 
     plt.figure(2)
     plt.plot(range(len(loss_history)), loss_history, color='blue', linewidth=2)
+    plt.plot(range(len(loss_history)), psnr_history, color='green', linewidth=2)
     plt.title('Training loss and PSNR over time')
     plt.xlabel('Batches (batch size = 1)')
     plt.ylabel('Loss')
