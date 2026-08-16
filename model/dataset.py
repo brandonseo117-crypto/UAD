@@ -2,6 +2,18 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
 
+class MRIValDataset(Dataset): # unlabeled for unsupervised anomaly detection
+    def __init__(self, img_dir):
+        self.img_dir = img_dir
+        self.img_paths = [img_path for img_path in Path(self.img_dir).iterdir()]
+    def __len__(self):
+        return len(self.img_paths)
+    def __getitem__(self, idx):
+        img_path = self.img_paths[idx]
+        metadata = torch.load(img_path, weights_only=False)
+        x_tensor = metadata['tensor']
+        return x_tensor
+
 class MRITrainDataset(Dataset): # unlabeled for unsupervised anomaly detection
     def __init__(self, img_dir):
         self.img_dir = img_dir
@@ -10,12 +22,8 @@ class MRITrainDataset(Dataset): # unlabeled for unsupervised anomaly detection
         return len(self.img_paths)
     def __getitem__(self, idx):
         img_path = self.img_paths[idx]
-        metadata = torch.load(img_path, weights_only=True)
-        x_tensor = metadata['tensor']
+        x_tensor = torch.load(img_path, weights_only=True)
         return x_tensor
-
-train_dataset = MRITrainDataset(img_dir='sample_path')
-train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
 
 class MRITestDataset(Dataset): # has labels but aren't directly used in inference, used for later data analysis
     def __init__(self, img_dir):
@@ -37,6 +45,12 @@ class MRITestDataset(Dataset): # has labels but aren't directly used in inferenc
         pt_id = metadata['ptid']
 
         return x_tensor, label, vis_date, pt_id
+
+train_dataset = MRITrainDataset(img_dir='sample_path')
+train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
+
+val_dataset = MRIValDataset(img_dir='sample_path')
+val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
 
 test_dataset = MRITestDataset('sample_path')
 test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
