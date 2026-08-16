@@ -72,7 +72,9 @@ if __name__ == "__main__":
             peak_vram_bytes = torch.cuda.max_memory_allocated()
             peak_vram_mb = peak_vram_bytes / (1024**2)
             vram_history.append(peak_vram_mb)
-            psnr_history.append(calculate_psnr(output.detach(), input_data).item())
+            with torch.no_grad():
+                psnr_val = calculate_psnr(output, input_data).item()
+            psnr_history.append(psnr_val)
             loss_history.append(loss.item())
 
             timestamps.append(time.time() - start_time)
@@ -106,7 +108,7 @@ if __name__ == "__main__":
 
     plt.figure(3)
     plt.plot(range(len(loss_history)), psnr_history, color='green', linewidth=2)
-    plt.title('Training loss over time')
+    plt.title('PSNR over time')
     plt.xlabel('Batches (batch size = 1)')
     plt.ylabel('PSNR')
     plt.grid(True)
