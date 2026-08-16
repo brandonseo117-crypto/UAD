@@ -26,16 +26,17 @@ class VAEModel(torch.nn.Module):
         return self.vae(x)
 
     def anomaly_mapping(self, x):
-        recon_x, _, _, _ = self.forward(x)
+        recon_x, _, _= self.forward(x)
         return torch.abs(x - recon_x), recon_x 
 
 class ELBOvae(torch.nn.Module):
     def __init__(self, beta=1e-3):
         super().__init__()
         self.beta = beta
+        self.huber = torch.nn.HuberLoss()
 
     def forward(self, x, recon_x, mu, logvar):
-        recon_loss = torch.nn.functional.mse_loss(recon_x, x)
+        recon_loss = self.huber(recon_x, x)
         kld_loss = torch.mean(-0.5 * torch.sum(1 + logvar - mu**2 - logvar.exp(), dim=1))
         return recon_loss + (self.beta * kld_loss)
 
@@ -49,7 +50,7 @@ if __name__ == "__main__":
     criterion = ELBOvae()
     epochs = 5
 
-    calculate_psnr = PeakSignalNoiseRatio(data_range=None).to(device)
+    calculate_psnr = PeakSignalNoiseRatio(data_range=5.0).to(device)
 
     psnr_history = []
     vram_history = []

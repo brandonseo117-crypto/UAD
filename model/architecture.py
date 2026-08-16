@@ -190,7 +190,7 @@ if __name__ == "__main__":
     criterion = DualDomainLoss(alpha=1, beta=0.4)
     epochs = 5
 
-    calculate_psnr = PeakSignalNoiseRatio(data_range=None).to(device)
+    calculate_psnr = PeakSignalNoiseRatio(data_range=5.0).to(device)
 
     loss_history = []
     vram_history = []

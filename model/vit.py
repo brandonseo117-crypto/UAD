@@ -1,3 +1,5 @@
+from typing import Any
+
 import torch
 from torch.optim import Adam
 import torch.nn as nn
@@ -5,95 +7,63 @@ from dataset import train_loader
 from torchmetrics.image import PeakSignalNoiseRatio
 import matplotlib.pyplot as plt
 import time
+from monai.networks.nets.vitautoenc import ViTAutoEnc
 
-class ViTVAE(nn.Module):
-    def __init__(self, in_channels=1, img_size=(128,128,128), patch_size=(16, 16, 16), embed_dim=768, num_heads=12, depth=6):
-        super().__init__()
-        self.patch_size = patch_size
-        self.img_size = img_size
-        self.embed_dim = embed_dim
-        self.in_channels = in_channels
-        self.num_heads = num_heads
-        self.depth = depth
-        self.grid_size = (img_size[0] // patch_size[0], img_size[1] // patch_size[1], img_size[2] // patch_size[2])
-        self.num_patches = (
-            (img_size[0] // patch_size[0]) * 
-            (img_size[1] // patch_size[1]) * 
-            (img_size[2] // patch_size[2])
+class VitAE(nn.Module):
+    def __init__(self, input_shape=(1, 128, 128, 128)):
+        super(VitAE, self).__init__()
+        self.input_shape = input_shape
+        self.model = ViTAutoEnc(
+            img_size=(128, 128, 128),
+            patch_size=(16, 16, 16),
+            in_channels=1,
+            out_channels=1,
+            deconv_chns=16,
+            hidden_size=768,
+            mlp_dim=3072,
+            num_layers=12,
+            num_heads=12,
+            proj_type="conv",
         )
-        self.patchification = nn.Conv3d(
-                                   in_channels=self.in_channels, 
-                                   out_channels=self.embed_dim, 
-                                   kernel_size=(self.patch_size), 
-                                   stride=(self.patch_size)
-                                )
-        
-        self.pos_embedding = nn.Parameter(torch.zeros(1, self.num_patches, self.embed_dim))
-        nn.init.trunc_normal_(self.pos_embedding, std=0.02)
-
-        self.encoder = nn.TransformerEncoderLayer(
-            d_model=embed_dim,
-            nhead=self.num_heads,
-            dim_feedforward=self.embed_dim*4,
-            activation='gelu',
-            batch_first=True
-        )
-
-        self.transformer_encoder = nn.TransformerEncoder(self.encoder, num_layers=depth)
-
-        self.fc_mu = nn.Linear(self.embed_dim, self.embed_dim)
-        self.fc_logvar = nn.Linear(self.embed_dim, self.embed_dim)
-        self.decoder_linear = nn.Linear(self.embed_dim, self.embed_dim)
-
-        self.decoder_conv = nn.ConvTranspose3d(
-            in_channels=self.embed_dim,
-            out_channels=self.in_channels,
-            kernel_size=self.patch_size,
-            stride=self.patch_size
-        )
-    
-    def patching_input(self, x):
-        conv_out = self.patchification(x)
-        return conv_out.flatten(2, -1).transpose(1,2)
-
-    def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return mu + eps * std
 
     def forward(self, x):
-        tokens = self.patching_input(x)
-        tokens = tokens + self.pos_embedding
-        encoded_tokens = self.transformer_encoder(tokens)
-        mu = self.fc_mu(encoded_tokens)
-        logvar = self.fc_logvar(encoded_tokens)
-        z = self.reparameterize(mu, logvar)
-        dec_tokens = self.decoder_linear(z)
-        dec_tokens = dec_tokens.transpose(1,2)
-        dec_grid = dec_tokens.view(x.shape[0], self.embed_dim, self.grid_size[0], self.grid_size[1], self.grid_size[2])
-        reconstructed_img = self.decoder_conv(dec_grid)
-        return reconstructed_img, mu, logvar
+        reconstructed_img, hidden_state = self.model(x) 
+        return reconstructed_img, hidden_state
 
-class ELBOvit(nn.Module):
-    def __init__(self, beta=1e-3):
+class VitDualDomainLoss(nn.Module):
+    def __init__(self, alpha=1.0, beta=0.4):
         super().__init__()
-        self.beta = beta
+        self.alpha = alpha  # Feature alignment weight
+        self.beta = beta    # Data-space Huber reconstruction weight
+        self.huber = nn.HuberLoss()
+        self.cosine = nn.CosineSimilarity(dim=-1)
 
-    def forward(self, x, recon_x, mu, logvar):
-        recon_loss = torch.nn.functional.mse_loss(recon_x, x)
-        kld_loss = torch.mean(-0.5 * torch.sum(1 + logvar - mu**2 - logvar.exp(), dim=(1,2)))
-        return recon_loss + (self.beta * kld_loss)
+    def forward(self, input_vol, target_vol, hidden_states):
+        # 1. Voxel-space reconstruction loss
+        l_data = self.huber(input_vol, target_vol)
 
+        # 2. Feature-space cosine distance
+        # Correctly matches e1 with d1 (base_dim) and e2 with d2 (base_dim*2)
+        l_feat = 0.0
+        if hidden_states is not None and len(hidden_states) > 1:
+            # Compare earlier layers against the deepest layer
+            ref_layer = hidden_states[-1]
+            for state in hidden_states[:-1]:
+                sim = self.cosine(state, ref_layer).mean()
+                l_feat += (1.0 - sim)
+
+        return self.alpha * l_feat + self.beta * l_data
+    
 if __name__ == "__main__":
     #loop
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
-    model = ViTVAE().to(device)
+    model = VitAE().to(device)
     model.train()
     optimizer = Adam(model.parameters(), lr=1e-3)
-    criterion = ELBOvit()
+    criterion = VitDualDomainLoss()
     epochs = 5
-    calculate_psnr = PeakSignalNoiseRatio(data_range=None).to(device)
+    calculate_psnr = PeakSignalNoiseRatio(data_range=5.0).to(device)
 
     psnr_history = []
     vram_history = []
@@ -107,8 +77,8 @@ if __name__ == "__main__":
         for idx, input_data in enumerate(train_loader):
             optimizer.zero_grad()
             input_data = input_data.to(device)
-            output, mu, logvar = model(input_data)
-            loss = criterion(input_data, output, mu, logvar)
+            output, hidden_state = model(input_data)
+            loss = criterion(output, input_data, hidden_state)
             loss.backward()
             optimizer.step()
             peak_vram_bytes = torch.cuda.max_memory_allocated()
