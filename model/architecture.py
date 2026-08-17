@@ -118,13 +118,11 @@ class MambaUAD(nn.Module): #Good
     def __init__(self, in_channels=1, base_dim=48):
         super().__init__()
         # Stem: 7x7x7 Depth-wise Conv, Stride 2 [10]
-        self.stem = nn.Conv3d(in_channels, base_dim,
-                              kernel_size=7, stride=2, padding=3)
+        self.stem = nn.Conv3d(in_channels, base_dim,kernel_size=7, stride=2, padding=3)
 
         # Encoder Layers [11]
         self.enc1 = TSMambaBlock(base_dim)
         self.down1 = nn.Conv3d(base_dim, base_dim*2, kernel_size=2, stride=2)
-
         self.enc2 = TSMambaBlock(base_dim*2)
         self.down2 = nn.Conv3d(base_dim*2, base_dim*4, kernel_size=2, stride=2)
 
@@ -132,28 +130,23 @@ class MambaUAD(nn.Module): #Good
         self.bottleneck = TSMambaBlock(base_dim*4)
 
         # Decoder Layers (Symmetric) [9]
-        self.up2 = nn.ConvTranspose3d(
-            base_dim*4, base_dim*2, kernel_size=2, stride=2)
+        self.up2 = nn.ConvTranspose3d(base_dim*4, base_dim*2, kernel_size=2, stride=2)
         self.dec2 = TSMambaBlock(base_dim*2)
-
-        self.up1 = nn.ConvTranspose3d(
-            base_dim*2, base_dim, kernel_size=2, stride=2)
+        self.up1 = nn.ConvTranspose3d(base_dim*2, base_dim, kernel_size=2, stride=2)
         self.dec1 = TSMambaBlock(base_dim)
 
         # Final Reconstruction Head
-        self.final_up = nn.ConvTranspose3d(
-            base_dim, in_channels, kernel_size=2, stride=2)
+        self.final_up = nn.ConvTranspose3d(base_dim, in_channels, kernel_size=2, stride=2)
 
     def forward(self, x):
         # Encoder path with skip connections
         s0 = self.stem(x)
         e1 = self.enc1(s0)
         e2 = self.enc2(self.down1(e1))
-
         b = self.bottleneck(self.down2(e2))
 
         # Decoder path [9]
-        d2 = self.dec2(self.up2(b) + e2)  # Skip connection [11]
+        d2 = self.dec2(self.up2(b) + e2)
         d1 = self.dec1(self.up1(d2) + e1)
 
         out = self.final_up(d1)
@@ -172,9 +165,7 @@ class DualDomainLoss(nn.Module):
         # 1. Voxel-space reconstruction loss
         l_data = self.huber(input_vol, target_vol)
 
-        # 2. Feature-space cosine distance
         l_feat = 0.0
-        # Correctly matches e1 with d1 (base_dim) and e2 with d2 (base_dim*2)
         for f_e, f_d in zip(enc_feats[:2], dec_feats):
             sim = self.cosine(f_e, f_d).mean()
             l_feat += (1.0 - sim)
@@ -204,12 +195,13 @@ if __name__ == "__main__":
         running_loss = 0.0
         for idx, input_data in enumerate(train_loader):
             input_data = input_data.to(device)
+            torch.cuda.reset_peak_memory_stats(device)
             optimizer.zero_grad()
             output, encs, decs = model(input_data)
             loss = criterion(input_vol=output, target_vol=input_data, enc_feats=encs, dec_feats=decs)
             loss.backward()
             optimizer.step()
-            peak_vram_bytes = torch.cuda.max_memory_allocated()
+            peak_vram_bytes = torch.cuda.max_memory_allocated(device)
             peak_vram_mb = peak_vram_bytes / (1024 ** 2)
             vram_history.append(peak_vram_mb)
             timestamps.append(time.time() - start_time)
@@ -219,7 +211,6 @@ if __name__ == "__main__":
             loss_history.append(loss.item())
             print(peak_vram_mb)
             running_loss += loss.item()
-            torch.cuda.reset_peak_memory_stats()
 
         avg_loss = running_loss / len(train_loader)
         print(f"Epoch [{epoch+1}/{epochs}], avg loss: {avg_loss:.4f}")

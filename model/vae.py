@@ -62,14 +62,15 @@ if __name__ == "__main__":
     for epoch in range(epochs):
         running_loss = 0.0
         for idx, input_data in enumerate(train_loader):
-            optimizer.zero_grad()
             input_data = input_data.to(device)
+            torch.cuda.reset_peak_memory_stats(device)
+            optimizer.zero_grad()
             output, mu, logvar = model(input_data)
             loss = criterion(input_data, output, mu, logvar)
             loss.backward()
             optimizer.step()
 
-            peak_vram_bytes = torch.cuda.max_memory_allocated()
+            peak_vram_bytes = torch.cuda.max_memory_allocated(device)
             peak_vram_mb = peak_vram_bytes / (1024**2)
             vram_history.append(peak_vram_mb)
             with torch.no_grad():
@@ -81,7 +82,7 @@ if __name__ == "__main__":
             
             running_loss += loss.item()
 
-            torch.cuda.reset_peak_memory_stats()
+            
 
         avg_loss = running_loss / len(train_loader)
         print(f"Epoch [{epoch+1}/{epochs}], avg loss: {avg_loss:.4f}")
