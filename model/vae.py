@@ -26,7 +26,7 @@ class VAEModel(torch.nn.Module):
         return self.vae(x)
 
     def anomaly_mapping(self, x):
-        recon_x, _, _= self.forward(x)
+        recon_x, _, _= self(x)
         return torch.abs(x - recon_x), recon_x 
 
 class ELBOvae(torch.nn.Module):
@@ -65,7 +65,7 @@ if __name__ == "__main__":
             input_data = input_data.to(device)
             torch.cuda.reset_peak_memory_stats(device)
             optimizer.zero_grad()
-            output, mu, logvar = model(input_data)
+            (output, mu, logvar) = model(input_data)
             loss = criterion(input_data, output, mu, logvar)
             loss.backward()
             optimizer.step()

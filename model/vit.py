@@ -51,6 +51,7 @@ class VitDualDomainLoss(nn.Module):
             for state in hidden_states[:-1]:
                 sim = self.cosine(state, ref_layer).mean()
                 l_feat += (1.0 - sim)
+            l_feat = l_feat / (len(hidden_states) - 1) 
 
         return self.alpha * l_feat + self.beta * l_data
     
