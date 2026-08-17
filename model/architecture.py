@@ -57,22 +57,23 @@ class TriOrientatedMamba(nn.Module):
 
         # --- Orientation 1: Forward Direction (zf) ---
         # (B, C, D, H, W) -> (B, L, C)
-        x_f = x.permute(0, 2, 3, 4, 1).contiguous().view(B, L, C)
+        x_f = rearrange(x, 'b c d h w -> b (d h w) c')
         y_f = self.mamba_f(x_f)
-        y_f = y_f.view(B, D, H, W, C).permute(0, 4, 1, 2, 3)
+        y_f = rearrange(y_f, 'b (d h w) c -> b c d h w', d=D, h=H, w=W)
 
         # --- Orientation 2: Reverse Direction (zr) ---
         # Correctly flip along dimension 1 (sequence axis L)
-        x_r = torch.flip(x_f, dims=[1])
+        x_r = torch.flip(x_f, dims=[1]).contiguous()
         y_r = self.mamba_r(x_r)
-        y_r = torch.flip(y_r, dims=[1])  # Flip back to restore original alignment
-        y_r = y_r.view(B, D, H, W, C).permute(0, 4, 1, 2, 3)
+        y_r = torch.flip(y_r, dims=[1]).contiguous()  # Flip back to restore original alignment
+        y_r = rearrange(y_r, 'b (d h w) c -> b c d h w', d=D, h=H, w=W)
 
         # --- Orientation 3: Inter-slice Direction (zs) ---
         # Transpose Depth (D) and Width (W)
-        x_s = x.permute(0, 4, 3, 2, 1).contiguous().view(B, L, C)
+        x_s = rearrange(x, 'b c d h w -> b (w h d) c')
         y_s = self.mamba_s(x_s)
-        y_s = y_s.view(B, W, H, D, C).permute(0, 4, 3, 2, 1)
+        y_s = rearrange(y_s, 'b (w h d) c -> b c w h d', d=D, h=H, w=W)
+        y_s = rearrange(y_s, 'b c w h d -> b c d h w')
 
         # Fusion: Element-wise sum across all 3 spatial scans
         return y_f + y_r + y_s
