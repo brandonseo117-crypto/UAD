@@ -134,6 +134,7 @@ if __name__ == "__main__":
     plt.ylabel('Loss')
     plt.xticks(epoch_axis)
     plt.grid(True)
+    plt.legend()
     plt.savefig('figures/vit_convergence.svg', format='svg')
     plt.close()
 
@@ -145,6 +146,7 @@ if __name__ == "__main__":
     plt.ylabel('PSNR')
     plt.xticks(epoch_axis)
     plt.grid(True)
+    plt.legend()
     plt.savefig('figures/vit_psnr.svg', format='svg')
     plt.close()
 
@@ -155,5 +157,6 @@ if __name__ == "__main__":
     plt.ylabel('VRAM usage (MB)')
     plt.xticks(epoch_axis)
     plt.grid(True)
+    plt.legend()
     plt.savefig('figures/vit_vram.svg', format='svg')
     plt.close()
