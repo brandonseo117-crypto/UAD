@@ -27,18 +27,19 @@ class VAEModel(torch.nn.Module):
         return self.vae(x)
 
     def anomaly_mapping(self, x):
-        recon_x, _, _, _= self(x)
+        recon_x, _, _, _ = self(x)
         return torch.abs(x - recon_x), recon_x 
 
 class ELBOvae(torch.nn.Module):
     def __init__(self, beta=1e-3):
         super().__init__()
         self.beta = beta
-        self.huber = torch.nn.HuberLoss()
+        self.huber = torch.nn.HuberLoss(reduction="mean")
 
     def forward(self, x, recon_x, mu, logvar):
         recon_loss = self.huber(recon_x, x)
-        kld_loss = torch.mean(-0.5 * torch.sum(1 + logvar - mu**2 - logvar.exp(), dim=1))
+        kld_elements = 1 + logvar - mu**2 - logvar.exp()
+        kld_loss = torch.mean(-0.5 * torch.sum(kld_elements, dim=1))
         return recon_loss + (self.beta * kld_loss)
 
 if __name__ == "__main__":
@@ -68,8 +69,8 @@ if __name__ == "__main__":
         for idx, input_data in enumerate(train_loader):
             input_data = input_data.squeeze(dim=0).to(device)
             optimizer.zero_grad()
-            output, encs, decs = model(input_data)
-            loss = criterion(input_vol=output, target_vol=input_data, enc_feats=encs, dec_feats=decs)
+            output, mu, logvar, _ = model(input_data)
+            loss = criterion(input_data, output, mu, logvar)
             loss.backward()
             optimizer.step()
 
@@ -79,9 +80,10 @@ if __name__ == "__main__":
                 running_psnr += psnr_val
                 peak_vram_bytes = torch.cuda.max_memory_allocated(device)
                 peak_vram_mb = peak_vram_bytes / (1024 ** 2)
+                current_lr = optimizer.param_groups[0]['lr']
 
                 if idx % 10 == 0:
-                    print(f'Batch {idx} Peak VRAM: {peak_vram_mb:.1f}MB Loss: {loss.item():.4f} PSNR: {psnr_val:.2f}')
+                    print(f'Batch {idx} Peak VRAM: {peak_vram_mb:.1f}MB Loss: {loss.item():.4f} PSNR: {psnr_val:.2f} current lr: {current_lr}')
 
         model.eval()
         val_running_loss = 0.0
@@ -89,8 +91,8 @@ if __name__ == "__main__":
         with torch.no_grad():
             for idx, input_data in enumerate(val_loader):
                 input_data = input_data.squeeze(dim=0).to(device)
-                output, encs, decs = model(input_data)
-                loss = criterion(input_vol=output, target_vol=input_data, enc_feats=encs, dec_feats=decs)
+                output, mu, logvar, _ = model(input_data)
+                loss = criterion(input_data, output, mu, logvar)
                 psnr_val = calculate_psnr(output, input_data).item()
                 val_running_loss += loss.item()
                 val_running_psnr += psnr_val

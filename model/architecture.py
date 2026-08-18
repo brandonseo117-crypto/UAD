@@ -53,29 +53,23 @@ class TriOrientatedMamba(nn.Module):
 
     def forward(self, x):
         B, C, D, H, W = x.shape
-        L = D * H * W  # Total sequence length
-
-        # --- Orientation 1: Forward Direction (zf) ---
-        # (B, C, D, H, W) -> (B, L, C)
+        
         x_f = rearrange(x, 'b c d h w -> b (d h w) c')
         y_f = self.mamba_f(x_f)
         y_f = rearrange(y_f, 'b (d h w) c -> b c d h w', d=D, h=H, w=W)
-
-        # --- Orientation 2: Reverse Direction (zr) ---
-        # Correctly flip along dimension 1 (sequence axis L)
-        x_r = torch.flip(x_f, dims=[1]).contiguous()
+        
+        x_r = torch.flip(x_f, dims=[1])
         y_r = self.mamba_r(x_r)
-        y_r = torch.flip(y_r, dims=[1]).contiguous()  # Flip back to restore original alignment
+        y_r = torch.flip(y_r, dims=[1])
         y_r = rearrange(y_r, 'b (d h w) c -> b c d h w', d=D, h=H, w=W)
-
-        # --- Orientation 3: Inter-slice Direction (zs) ---
-        # Transpose Depth (D) and Width (W)
-        x_s = rearrange(x, 'b c d h w -> b (w h d) c')
+        
+        x_s_perm = rearrange(x, 'b c d h w -> b c w h d')
+        x_s = rearrange(x_s_perm, 'b c w h d -> b (w h d) c')
         y_s = self.mamba_s(x_s)
-        y_s = rearrange(y_s, 'b (w h d) c -> b c w h d', d=D, h=H, w=W)
+        y_s = rearrange(y_s, 'b (w h d) c -> b c w h d', w=W, h=H, d=D)
         y_s = rearrange(y_s, 'b c w h d -> b c d h w')
-
-        # Fusion: Element-wise sum across all 3 spatial scans
+        
+        # Fusion
         return y_f + y_r + y_s
 
 
@@ -84,8 +78,8 @@ class TSMambaBlock(nn.Module): # good
         super().__init__()
         self.gsc = GatedSpatialConv3d(dim)
         self.tom = TriOrientatedMamba(d_model=dim)
-        self.norm1 = nn.LayerNorm(dim)
-        self.norm2 = nn.LayerNorm(dim)
+        self.norm1 = nn.InstanceNorm1d(dim)
+        self.norm2 = nn.InstanceNorm1d(dim)
 
         self.mlp = nn.Sequential(
             nn.Linear(dim, dim * 4),
@@ -94,23 +88,23 @@ class TSMambaBlock(nn.Module): # good
         )
 
     def forward(self, x):
-        # 1. Local Spatial Gating [3]
         x = self.gsc(x)
 
-        # 2. Global Tri-orientated Scanning [3]
         B, C, D, H, W = x.shape
         res = x
-        x = rearrange(x, 'b c d h w -> b (d h w) c')
+        x = rearrange(x, 'b c d h w -> b c (d h w)')
         x = self.norm1(x)
-        x = rearrange(x, 'b (d h w) c -> b c d h w', d=D, h=H, w=W)
+        x = rearrange(x, 'b c (d h w) -> b c d h w', d=D, h=H, w=W)
         x = self.tom(x) + res
-
-        # 3. Feature Enrichment (MLP) [3]
+        
         res = x
-        x = rearrange(x, 'b c d h w -> b (d h w) c')
+        x = rearrange(x, 'b c d h w -> b c (d h w)')
         x = self.norm2(x)
+        
+        x = rearrange(x, 'b c (d h w) -> b (d h w) c')
         x = self.mlp(x)
         x = rearrange(x, 'b (d h w) c -> b c d h w', d=D, h=H, w=W)
+        
         return x + res
 
 
@@ -129,6 +123,10 @@ class MambaUAD(nn.Module): #Good
         # Bottleneck
         self.bottleneck = TSMambaBlock(base_dim*4)
 
+        # Gating mechanism
+        self.gate1 = GatedSpatialConv3d(base_dim)
+        self.gate2 = GatedSpatialConv3d(base_dim*2)
+
         # Decoder Layers (Symmetric) [9]
         self.up2 = nn.ConvTranspose3d(base_dim*4, base_dim*2, kernel_size=2, stride=2)
         self.dec2 = TSMambaBlock(base_dim*2)
@@ -139,37 +137,37 @@ class MambaUAD(nn.Module): #Good
         self.final_up = nn.ConvTranspose3d(base_dim, in_channels, kernel_size=2, stride=2)
 
     def forward(self, x):
-        # Encoder path with skip connections
+        # Encoder path with GATED skip connections
         s0 = self.stem(x)
         e1 = self.enc1(s0)
         e2 = self.enc2(self.down1(e1))
         b = self.bottleneck(self.down2(e2))
-
-        # Decoder path [9]
-        d2 = self.dec2(self.up2(b) + e2)
-        d1 = self.dec1(self.up1(d2) + e1)
+        up_b = self.up2(b)
+        gated_e2 = self.gate2(e2)
+        d2 = self.dec2(up_b + gated_e2)
+        up_d2 = self.up1(d2)
+        gated_e1 = self.gate1(e1)
+        d1 = self.dec1(up_d2 + gated_e1)
 
         out = self.final_up(d1)
-        return out, [e1, e2, b], [d1, d2]
+        return out, [e1, e2], [d1, d2]
 
 
 class DualDomainLoss(nn.Module):
     def __init__(self, alpha=1.0, beta=0.4):
         super().__init__()
-        self.alpha = alpha  # Feature alignment weight
-        self.beta = beta    # Data-space Huber reconstruction weight
+        self.alpha = alpha
+        self.beta = beta
         self.huber = nn.HuberLoss()
         self.cosine = nn.CosineSimilarity(dim=1)
 
     def forward(self, input_vol, target_vol, enc_feats, dec_feats):
-        # 1. Voxel-space reconstruction loss
         l_data = self.huber(input_vol, target_vol)
-
         l_feat = 0.0
-        for f_e, f_d in zip(enc_feats[:2], dec_feats):
-            sim = self.cosine(f_e, f_d).mean()
-            l_feat += (1.0 - sim)
-
+        for f_e, f_d in zip(enc_feats, dec_feats):
+            dist = 1.0 - self.cosine(f_e, f_d)
+            l_feat += dist.mean()
+        
         return self.alpha * l_feat + self.beta * l_data
 
 if __name__ == "__main__":
@@ -212,9 +210,10 @@ if __name__ == "__main__":
                 running_psnr += psnr_val
                 peak_vram_bytes = torch.cuda.max_memory_allocated(device)
                 peak_vram_mb = peak_vram_bytes / (1024 ** 2)
-
+                current_lr = scheduler.get_last_lr()[0]
+                
                 if idx % 10 == 0:
-                    print(f'Batch {idx} Peak VRAM: {peak_vram_mb:.1f}MB Loss: {loss.item():.4f} PSNR: {psnr_val:.2f}')
+                    print(f'Batch {idx} Peak VRAM: {peak_vram_mb:.1f}MB Loss: {loss.item():.4f} PSNR: {psnr_val:.2f} current lr: {current_lr}')
 
         epoch_max_vram_bytes = torch.cuda.max_memory_allocated(device)
         epoch_max_vram_mb = epoch_max_vram_bytes / (1024 ** 2)

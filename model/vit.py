@@ -89,9 +89,10 @@ if __name__ == "__main__":
                 running_psnr += psnr_val
                 peak_vram_bytes = torch.cuda.max_memory_allocated(device)
                 peak_vram_mb = peak_vram_bytes / (1024 ** 2)
+                current_lr = optimizer.param_groups[0]['lr']
 
                 if idx % 10 == 0:
-                    print(f'Batch {idx} Peak VRAM: {peak_vram_mb:.1f}MB Loss: {loss.item():.4f} PSNR: {psnr_val:.2f}')
+                    print(f'Batch {idx} Peak VRAM: {peak_vram_mb:.1f}MB Loss: {loss.item():.4f} PSNR: {psnr_val:.2f} current lr: {current_lr}')
 
         model.eval()
         val_running_loss = 0.0
