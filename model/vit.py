@@ -40,7 +40,7 @@ class VitDualDomainLoss(nn.Module):
         #Voxel-space reconstruction loss
         l_data = self.huber(input_vol, target_vol)
 
-        l_feat = 0.0
+        l_feat = torch.tensor(0.0, device=input_vol.device)
         if hidden_states is not None and len(hidden_states) > 1:
             # Compare earlier layers against the deepest layer
             ref_layer = hidden_states[-1]
@@ -75,10 +75,10 @@ if __name__ == "__main__":
         running_psnr = 0.0
         torch.cuda.reset_peak_memory_stats(device)
         for idx, input_data in enumerate(train_loader):
-            input_data = input_data.squeeze(dim=0).to(device)
+            input_data = input_data.squeeze(dim=0).to(device) if input_data.ndim > 5 else input_data.to(device)
             optimizer.zero_grad()
             output, hidden_state_tensor = model(input_data)
-            loss = criterion(output, input_data, hidden_state_tensor)
+            loss = criterion(input_vol=output, target_vol=input_data, hidden_states=hidden_state_tensor)
             loss.backward()
             optimizer.step()
 
@@ -86,12 +86,10 @@ if __name__ == "__main__":
                 psnr_val = peak_signal_noise_ratio(output, input_data, data_range=5.0).item()
                 running_loss += loss.item()
                 running_psnr += psnr_val
-                peak_vram_bytes = torch.cuda.max_memory_allocated(device)
-                peak_vram_mb = peak_vram_bytes / (1024 ** 2)
-                current_lr = optimizer.param_groups[0]["lr"]
                 
                 if idx % 10 == 0:
-                    print(f'Batch {idx} Peak VRAM: {peak_vram_mb:.1f}MB Loss: {loss.item():.4f} PSNR: {psnr_val:.2f} current lr: {current_lr}')
+                    current_lr = optimizer.param_groups[0]["lr"]
+                    print(f'Batch {idx} Loss: {loss.item():.4f} PSNR: {psnr_val:.2f} current lr: {current_lr}')
 
         torch.cuda.synchronize(device)
         epoch_max_vram_mb = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
@@ -101,9 +99,9 @@ if __name__ == "__main__":
         val_running_psnr = 0.0
         with torch.no_grad():
             for idx, input_data in enumerate(val_loader):
-                input_data = input_data.squeeze(dim=0).to(device)
+                input_data = input_data.squeeze(dim=0).to(device) if input_data.ndim > 5 else input_data.to(device)
                 output, hidden_state_tensor = model(input_data)
-                loss = criterion(output, input_data, hidden_state_tensor)
+                loss = criterion(input_vol=output, target_vol=input_data, hidden_states=hidden_state_tensor)
                 psnr_val = peak_signal_noise_ratio(output, input_data, data_range=5.0).item()
                 val_running_loss += loss.item()
                 val_running_psnr += psnr_val
@@ -117,13 +115,12 @@ if __name__ == "__main__":
         avg_loss = running_loss / len(train_loader)
         loss_history.append(avg_loss)
         
-        
-        print(f"Epoch [{epoch+1}/{epochs}], avg loss: {avg_loss:.4f}")
+        print(f"Epoch [{epoch+1}/{epochs}], peak vram: {epoch_max_vram_mb} avg loss: {avg_loss:.4f}, avg val loss: {avg_val_loss}, avg psnr: {avg_psnr}, avg_val_psnr: {avg_val_psnr}")
 
         scheduler.step(avg_val_psnr)
         if avg_val_psnr > best_val_psnr:
             best_val_psnr = avg_val_psnr
-            torch.save(model.state_dict(), 'weights/best_vae_weights.pth')
+            torch.save(model.state_dict(), 'weights/best_vit_weights.pth')
 
     torch.save(model.state_dict(), 'weights/end_vit_weights.pth')
 
