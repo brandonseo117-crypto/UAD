@@ -5,7 +5,7 @@ from torch.optim import Adam
 import torch.optim.lr_scheduler as lr_scheduler
 from dataset import train_loader, val_loader
 from mamba_ssm import Mamba
-from torchmetrics.image import PeakSignalNoiseRatio
+from torchmetrics.functional.image import peak_signal_noise_ratio
 import matplotlib.pyplot as plt
 
 class GatedSpatialConv3d(nn.Module): #good
@@ -171,17 +171,14 @@ class DualDomainLoss(nn.Module):
         return self.alpha * l_feat + self.beta * l_data
 
 if __name__ == "__main__":
-    #loop
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
-
+    #need cuda
     model = MambaUAD().to(device)
     optimizer = Adam(model.parameters(), lr=1e-4)
     criterion = DualDomainLoss(alpha=1, beta=0.4)
     scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.2, patience=2, min_lr=1e-6)
     epochs = 15
-
-    calculate_psnr = PeakSignalNoiseRatio(data_range=5.0).to(device)
 
     vram_history = []
     loss_history = []
@@ -205,18 +202,17 @@ if __name__ == "__main__":
             optimizer.step()
 
             with torch.no_grad():
-                psnr_val = calculate_psnr(output, input_data).item()
+                psnr_val = peak_signal_noise_ratio(output, input_data, data_range=5.0).item()
                 running_loss += loss.item()
                 running_psnr += psnr_val
                 peak_vram_bytes = torch.cuda.max_memory_allocated(device)
                 peak_vram_mb = peak_vram_bytes / (1024 ** 2)
-                current_lr = scheduler.get_last_lr()[0]
+                current_lr = optimizer.param_groups[0]["lr"]
                 
                 if idx % 10 == 0:
                     print(f'Batch {idx} Peak VRAM: {peak_vram_mb:.1f}MB Loss: {loss.item():.4f} PSNR: {psnr_val:.2f} current lr: {current_lr}')
-
-        epoch_max_vram_bytes = torch.cuda.max_memory_allocated(device)
-        epoch_max_vram_mb = epoch_max_vram_bytes / (1024 ** 2)
+        torch.cuda.synchronize(device)
+        epoch_max_vram_mb = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
         vram_history.append(epoch_max_vram_mb)
         model.eval()
         val_running_loss = 0.0
@@ -226,7 +222,7 @@ if __name__ == "__main__":
                 input_data = input_data.squeeze(dim=0).to(device)
                 output, encs, decs = model(input_data)
                 loss = criterion(input_vol=output, target_vol=input_data, enc_feats=encs, dec_feats=decs)
-                psnr_val = calculate_psnr(output, input_data).item()
+                psnr_val = peak_signal_noise_ratio(output, input_data, data_range=5.0).item()
                 val_running_loss += loss.item()
                 val_running_psnr += psnr_val
 
