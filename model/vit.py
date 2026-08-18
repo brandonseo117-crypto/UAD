@@ -3,7 +3,7 @@ from torch.optim import Adam
 import torch.optim.lr_scheduler as lr_scheduler
 import torch.nn as nn
 from dataset import train_loader, val_loader
-from torchmetrics.image import PeakSignalNoiseRatio
+from torchmetrics.functional.image import peak_signal_noise_ratio
 import matplotlib.pyplot as plt
 from monai.networks.nets.vitautoenc import ViTAutoEnc
 
@@ -54,14 +54,12 @@ class VitDualDomainLoss(nn.Module):
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
-    model = VitAE(input_shape=(1, 128, 128, 128)).to(device)
-    model.train()
+    #need cuda
+    model = VitAE().to(device)
     optimizer = Adam(model.parameters(), lr=1e-4)
     criterion = VitDualDomainLoss()
-    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=2, factor=0.5, min_lr=1e-6)
+    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=2, min_lr=1e-6)
     epochs = 15
-
-    calculate_psnr = PeakSignalNoiseRatio(data_range=5.0).to(device)
 
     vram_history = []
     loss_history = []
@@ -70,6 +68,7 @@ if __name__ == "__main__":
     val_psnr_history = []
 
     best_val_psnr = -float('inf')
+
     for epoch in range(epochs):
         model.train()
         running_loss = 0.0
@@ -79,21 +78,24 @@ if __name__ == "__main__":
             input_data = input_data.squeeze(dim=0).to(device)
             optimizer.zero_grad()
             output, hidden_state_tensor = model(input_data)
-            loss = criterion(input_vol=output, target_vol=input_data, hidden_states=hidden_state_tensor)
+            loss = criterion(output, input_data, hidden_state_tensor)
             loss.backward()
             optimizer.step()
 
             with torch.no_grad():
-                psnr_val = calculate_psnr(output, input_data).item()
+                psnr_val = peak_signal_noise_ratio(output, input_data, data_range=5.0).item()
                 running_loss += loss.item()
                 running_psnr += psnr_val
                 peak_vram_bytes = torch.cuda.max_memory_allocated(device)
                 peak_vram_mb = peak_vram_bytes / (1024 ** 2)
-                current_lr = optimizer.param_groups[0]['lr']
-
+                current_lr = optimizer.param_groups[0]["lr"]
+                
                 if idx % 10 == 0:
                     print(f'Batch {idx} Peak VRAM: {peak_vram_mb:.1f}MB Loss: {loss.item():.4f} PSNR: {psnr_val:.2f} current lr: {current_lr}')
 
+        torch.cuda.synchronize(device)
+        epoch_max_vram_mb = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
+        vram_history.append(epoch_max_vram_mb)
         model.eval()
         val_running_loss = 0.0
         val_running_psnr = 0.0
@@ -101,8 +103,8 @@ if __name__ == "__main__":
             for idx, input_data in enumerate(val_loader):
                 input_data = input_data.squeeze(dim=0).to(device)
                 output, hidden_state_tensor = model(input_data)
-                loss = criterion(input_vol=output, target_vol=input_data, hidden_states=hidden_state_tensor)
-                psnr_val = calculate_psnr(output, input_data).item()
+                loss = criterion(output, input_data, hidden_state_tensor)
+                psnr_val = peak_signal_noise_ratio(output, input_data, data_range=5.0).item()
                 val_running_loss += loss.item()
                 val_running_psnr += psnr_val
 
@@ -114,23 +116,22 @@ if __name__ == "__main__":
         psnr_history.append(avg_psnr)
         avg_loss = running_loss / len(train_loader)
         loss_history.append(avg_loss)
-        epoch_max_vram_bytes = torch.cuda.max_memory_allocated(device)
-        epoch_max_vram_mb = epoch_max_vram_bytes / (1024 ** 2)
-        vram_history.append(epoch_max_vram_mb)
+        
+        
         print(f"Epoch [{epoch+1}/{epochs}], avg loss: {avg_loss:.4f}")
 
         scheduler.step(avg_val_psnr)
         if avg_val_psnr > best_val_psnr:
             best_val_psnr = avg_val_psnr
-            torch.save(model.state_dict(), 'weights/best_vit_weights.pth')
+            torch.save(model.state_dict(), 'weights/best_vae_weights.pth')
 
     torch.save(model.state_dict(), 'weights/end_vit_weights.pth')
 
     epoch_axis = [num+1 for num in range(15)]
 
     plt.figure(1)
-    plt.plot(epoch_axis, loss_history, color='blue', linewidth=2)
-    plt.plot(epoch_axis, val_loss_history, color='orange', linestyle='--', linewidth=2)
+    plt.plot(epoch_axis, loss_history, color='blue', linewidth=2, label='Training loss')
+    plt.plot(epoch_axis, val_loss_history, color='orange', linestyle='--', linewidth=2, label='Validation loss')
     plt.title('Training loss vs epochs')
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
@@ -140,8 +141,8 @@ if __name__ == "__main__":
     plt.close()
 
     plt.figure(2)
-    plt.plot(epoch_axis, psnr_history, color='green', linewidth=2)
-    plt.plot(epoch_axis, val_psnr_history, color='red', linestyle='--', linewidth=2)
+    plt.plot(epoch_axis, psnr_history, color='green', linewidth=2, label='Training PSNR')
+    plt.plot(epoch_axis, val_psnr_history, color='red', linestyle='--', linewidth=2, label='Validation PSNR')
     plt.title('PSNR vs epochs')
     plt.xlabel('Epochs')
     plt.ylabel('PSNR')

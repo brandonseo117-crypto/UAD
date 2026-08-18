@@ -177,7 +177,7 @@ if __name__ == "__main__":
     model = MambaUAD().to(device)
     optimizer = Adam(model.parameters(), lr=1e-4)
     criterion = DualDomainLoss(alpha=1, beta=0.4)
-    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.2, patience=2, min_lr=1e-6)
+    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=2, min_lr=1e-6)
     epochs = 15
 
     vram_history = []
@@ -248,8 +248,8 @@ if __name__ == "__main__":
     epoch_axis = [num+1 for num in range(15)]
 
     plt.figure(1)
-    plt.plot(epoch_axis, loss_history, color='blue', linewidth=2)
-    plt.plot(epoch_axis, val_loss_history, color='orange', linestyle='--', linewidth=2)
+    plt.plot(epoch_axis, loss_history, color='blue', linewidth=2, label='Training loss')
+    plt.plot(epoch_axis, val_loss_history, color='orange', linestyle='--', linewidth=2, label='Validation loss')
     plt.title('Training loss vs epochs')
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
@@ -259,8 +259,8 @@ if __name__ == "__main__":
     plt.close()
 
     plt.figure(2)
-    plt.plot(epoch_axis, psnr_history, color='green', linewidth=2)
-    plt.plot(epoch_axis, val_psnr_history, color='red', linestyle='--', linewidth=2)
+    plt.plot(epoch_axis, psnr_history, color='green', linewidth=2, label='Training PSNR')
+    plt.plot(epoch_axis, val_psnr_history, color='red', linestyle='--', linewidth=2, label='Validation PSNR')
     plt.title('PSNR vs epochs')
     plt.xlabel('Epochs')
     plt.ylabel('PSNR')
