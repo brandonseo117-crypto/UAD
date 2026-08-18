@@ -124,7 +124,7 @@ if __name__ == "__main__":
 
     torch.save(model.state_dict(), 'weights/end_vit_weights.pth')
 
-    epoch_axis = [num+1 for num in range(15)]
+    epoch_axis = [num+1 for num in range(epochs)]
 
     plt.figure(1)
     plt.plot(epoch_axis, loss_history, color='blue', linewidth=2, label='Training loss')
