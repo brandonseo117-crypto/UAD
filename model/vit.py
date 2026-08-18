@@ -59,7 +59,7 @@ if __name__ == "__main__":
     optimizer = Adam(model.parameters(), lr=1e-4)
     criterion = VitDualDomainLoss()
     scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=2, factor=0.5, min_lr=1e-6)
-    epochs = 5
+    epochs = 15
 
     calculate_psnr = PeakSignalNoiseRatio(data_range=5.0).to(device)
 
@@ -69,6 +69,7 @@ if __name__ == "__main__":
     psnr_history = []
     val_psnr_history = []
 
+    best_val_psnr = -float('inf')
     for epoch in range(epochs):
         model.train()
         running_loss = 0.0
@@ -118,8 +119,11 @@ if __name__ == "__main__":
         print(f"Epoch [{epoch+1}/{epochs}], avg loss: {avg_loss:.4f}")
 
         scheduler.step(avg_val_psnr)
+        if avg_val_psnr > best_val_psnr:
+            best_val_psnr = avg_val_psnr
+            torch.save(model.state_dict(), 'weights/best_vit_weights.pth')
 
-    torch.save(model.state_dict(), 'weights/vae_weights.pth')
+    torch.save(model.state_dict(), 'weights/end_vit_weights.pth')
 
     epoch_axis = [num+1 for num in range(15)]
 
@@ -131,7 +135,7 @@ if __name__ == "__main__":
     plt.ylabel('Loss')
     plt.xticks(epoch_axis)
     plt.grid(True)
-    plt.savefig('figures/vae_convergence.svg', format='svg')
+    plt.savefig('figures/vit_convergence.svg', format='svg')
     plt.close()
 
     plt.figure(2)
@@ -142,7 +146,7 @@ if __name__ == "__main__":
     plt.ylabel('PSNR')
     plt.xticks(epoch_axis)
     plt.grid(True)
-    plt.savefig('figures/vae_psnr.svg', format='svg')
+    plt.savefig('figures/vit_psnr.svg', format='svg')
     plt.close()
 
     plt.figure(3)
@@ -152,5 +156,5 @@ if __name__ == "__main__":
     plt.ylabel('VRAM usage (MB)')
     plt.xticks(epoch_axis)
     plt.grid(True)
-    plt.savefig('figures/vae_vram.svg', format='svg')
+    plt.savefig('figures/vit_vram.svg', format='svg')
     plt.close()

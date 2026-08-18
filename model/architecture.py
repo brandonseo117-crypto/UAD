@@ -191,6 +191,8 @@ if __name__ == "__main__":
     psnr_history = []
     val_psnr_history = []
 
+    best_val_psnr = -float('inf')
+
     for epoch in range(epochs):
         model.train()
         running_loss = 0.0
@@ -214,6 +216,9 @@ if __name__ == "__main__":
                 if idx % 10 == 0:
                     print(f'Batch {idx} Peak VRAM: {peak_vram_mb:.1f}MB Loss: {loss.item():.4f} PSNR: {psnr_val:.2f}')
 
+        epoch_max_vram_bytes = torch.cuda.max_memory_allocated(device)
+        epoch_max_vram_mb = epoch_max_vram_bytes / (1024 ** 2)
+        vram_history.append(epoch_max_vram_mb)
         model.eval()
         val_running_loss = 0.0
         val_running_psnr = 0.0
@@ -234,14 +239,16 @@ if __name__ == "__main__":
         psnr_history.append(avg_psnr)
         avg_loss = running_loss / len(train_loader)
         loss_history.append(avg_loss)
-        epoch_max_vram_bytes = torch.cuda.max_memory_allocated(device)
-        epoch_max_vram_mb = epoch_max_vram_bytes / (1024 ** 2)
-        vram_history.append(epoch_max_vram_mb)
+        
+        
         print(f"Epoch [{epoch+1}/{epochs}], avg loss: {avg_loss:.4f}")
 
         scheduler.step(avg_val_psnr)
+        if avg_val_psnr > best_val_psnr:
+            best_val_psnr = avg_val_psnr
+            torch.save(model.state_dict(), 'weights/best_mamba_weights.pth')
 
-    torch.save(model.state_dict(), 'weights/mamba_weights.pth')
+    torch.save(model.state_dict(), 'weights/end_mamba_weights.pth')
 
     epoch_axis = [num+1 for num in range(15)]
 
