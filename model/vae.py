@@ -1,7 +1,8 @@
 import torch
 from torch.optim import Adam
+import torch.optim.lr_scheduler as lr_scheduler
 from monai.networks.nets import VarAutoEncoder
-from dataset import train_loader
+from dataset import train_loader, val_loader
 from torchmetrics.image import PeakSignalNoiseRatio
 import time
 import matplotlib.pyplot as plt
@@ -41,75 +42,105 @@ class ELBOvae(torch.nn.Module):
         return recon_loss + (self.beta * kld_loss)
 
 if __name__ == "__main__":
-    #loop
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
     model = VAEModel(input_shape=(1, 128, 128, 128), latent_dim=256).to(device)
     model.train()
-    optimizer = Adam(model.parameters(), lr=1e-3)
+    optimizer = Adam(model.parameters(), lr=1e-4)
     criterion = ELBOvae()
+    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', patience=2, factor=0.5, min_lr=1e-6)
     epochs = 5
 
     calculate_psnr = PeakSignalNoiseRatio(data_range=5.0).to(device)
 
-    psnr_history = []
     vram_history = []
-    loss_history =[]
-    timestamps = []
-    
-    start_time = time.time()
-    #pretend we have a dataloader called 'train_loader'
+    loss_history = []
+    val_loss_history = []
+    psnr_history = []
+    val_psnr_history = []
+
     for epoch in range(epochs):
+        model.train()
         running_loss = 0.0
+        running_psnr = 0.0
+        torch.cuda.reset_peak_memory_stats(device)
         for idx, input_data in enumerate(train_loader):
-            input_data = input_data.to(device)
-            torch.cuda.reset_peak_memory_stats(device)
+            input_data = input_data.squeeze(dim=0).to(device)
             optimizer.zero_grad()
-            output, mu, logvar, _ = model(input_data)
-            loss = criterion(input_data, output, mu, logvar)
+            output, encs, decs = model(input_data)
+            loss = criterion(input_vol=output, target_vol=input_data, enc_feats=encs, dec_feats=decs)
             loss.backward()
             optimizer.step()
 
-            peak_vram_bytes = torch.cuda.max_memory_allocated(device)
-            peak_vram_mb = peak_vram_bytes / (1024**2)
-            vram_history.append(peak_vram_mb)
             with torch.no_grad():
                 psnr_val = calculate_psnr(output, input_data).item()
-            psnr_history.append(psnr_val)
-            loss_history.append(loss.item())
+                running_loss += loss.item()
+                running_psnr += psnr_val
+                peak_vram_bytes = torch.cuda.max_memory_allocated(device)
+                peak_vram_mb = peak_vram_bytes / (1024 ** 2)
 
-            timestamps.append(time.time() - start_time)
-            
-            running_loss += loss.item()
+                if idx % 10 == 0:
+                    print(f'Batch {idx} Peak VRAM: {peak_vram_mb:.1f}MB Loss: {loss.item():.4f} PSNR: {psnr_val:.2f}')
 
+        model.eval()
+        val_running_loss = 0.0
+        val_running_psnr = 0.0
+        with torch.no_grad():
+            for idx, input_data in enumerate(val_loader):
+                input_data = input_data.squeeze(dim=0).to(device)
+                output, encs, decs = model(input_data)
+                loss = criterion(input_vol=output, target_vol=input_data, enc_feats=encs, dec_feats=decs)
+                psnr_val = calculate_psnr(output, input_data).item()
+                val_running_loss += loss.item()
+                val_running_psnr += psnr_val
+
+        avg_val_loss = val_running_loss / len(val_loader)
+        val_loss_history.append(avg_val_loss)
+        avg_val_psnr = val_running_psnr / len(val_loader)
+        val_psnr_history.append(avg_val_psnr)
+        avg_psnr = running_psnr / len(train_loader)
+        psnr_history.append(avg_psnr)
         avg_loss = running_loss / len(train_loader)
+        loss_history.append(avg_loss)
+        epoch_max_vram_bytes = torch.cuda.max_memory_allocated(device)
+        epoch_max_vram_mb = epoch_max_vram_bytes / (1024 ** 2)
+        vram_history.append(epoch_max_vram_mb)
         print(f"Epoch [{epoch+1}/{epochs}], avg loss: {avg_loss:.4f}")
 
-    torch.save(model.state_dict(), 'vae_weights.pth')
+        scheduler.step(avg_val_psnr)
+
+    torch.save(model.state_dict(), 'weights/vae_weights.pth')
+
+    epoch_axis = [num+1 for num in range(15)]
 
     plt.figure(1)
-    plt.plot(timestamps, vram_history, color='blue', linewidth=2)
-    plt.title('VRAM Usage Over Time')
-    plt.xlabel('Time (seconds)')
-    plt.ylabel('VRAM Allocated (MB)')
-    plt.grid(True)
-    plt.savefig('figures/vae_vram_usage.svg', format='svg')
-    plt.close()
-
-    plt.figure(2)
-    plt.plot(range(len(loss_history)), loss_history, color='blue', linewidth=2)
-    plt.title('Training loss over time')
-    plt.xlabel('Batches (batch size = 1)')
+    plt.plot(epoch_axis, loss_history, color='blue', linewidth=2)
+    plt.plot(epoch_axis, val_loss_history, color='orange', linestyle='--', linewidth=2)
+    plt.title('Training loss vs epochs')
+    plt.xlabel('Epochs')
     plt.ylabel('Loss')
+    plt.xticks(epoch_axis)
     plt.grid(True)
     plt.savefig('figures/vae_convergence.svg', format='svg')
     plt.close()
 
-    plt.figure(3)
-    plt.plot(range(len(loss_history)), psnr_history, color='green', linewidth=2)
-    plt.title('PSNR over time')
-    plt.xlabel('Batches (batch size = 1)')
+    plt.figure(2)
+    plt.plot(epoch_axis, psnr_history, color='green', linewidth=2)
+    plt.plot(epoch_axis, val_psnr_history, color='red', linestyle='--', linewidth=2)
+    plt.title('PSNR vs epochs')
+    plt.xlabel('Epochs')
     plt.ylabel('PSNR')
+    plt.xticks(epoch_axis)
     plt.grid(True)
     plt.savefig('figures/vae_psnr.svg', format='svg')
+    plt.close()
+
+    plt.figure(3)
+    plt.plot(epoch_axis, vram_history, color='purple', linewidth=2)
+    plt.title('VRAM vs epochs')
+    plt.xlabel('Epochs')
+    plt.ylabel('VRAM usage (MB)')
+    plt.xticks(epoch_axis)
+    plt.grid(True)
+    plt.savefig('figures/vae_vram.svg', format='svg')
     plt.close()
