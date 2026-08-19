@@ -5,7 +5,7 @@ from torch.optim import Adam
 import torch.optim.lr_scheduler as lr_scheduler
 from dataset import train_loader, val_loader
 from mamba_ssm import Mamba
-from torchmetrics.functional.image import peak_signal_noise_ratio
+from torchmetrics.functional.image import peak_signal_noise_ratio, structural_similarity_index_measure
 import matplotlib.pyplot as plt
 
 class GatedSpatialConv3d(nn.Module): #good
@@ -178,37 +178,33 @@ if __name__ == "__main__":
     optimizer = Adam(model.parameters(), lr=1e-4)
     criterion = DualDomainLoss(alpha=1, beta=0.4)
     scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=2, min_lr=1e-6)
-    epochs = 15
+    epochs = 20
 
     vram_history = []
     loss_history = []
     val_loss_history = []
-    psnr_history = []
     val_psnr_history = []
+    val_ssim_history = []
 
     best_val_psnr = -float('inf')
 
     for epoch in range(epochs):
         model.train()
         running_loss = 0.0
-        running_psnr = 0.0
         torch.cuda.reset_peak_memory_stats(device)
         for idx, input_data in enumerate(train_loader):
             input_data = input_data.squeeze(dim=0).to(device) if input_data.ndim > 5 else input_data.to(device)
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             output, encs, decs = model(input_data)
             loss = criterion(input_vol=output, target_vol=input_data, enc_feats=encs, dec_feats=decs)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
+            running_loss += loss.item()
 
-            with torch.no_grad():
-                psnr_val = peak_signal_noise_ratio(output, input_data, data_range=5.0).item()
-                running_loss += loss.item()
-                running_psnr += psnr_val
-
-                if idx % 10 == 0:
-                    current_lr = optimizer.param_groups[0]["lr"]
-                    print(f'Batch {idx} Loss: {loss.item():.4f} PSNR: {psnr_val:.2f} current lr: {current_lr}')
+            if idx % 10 == 0:
+                current_lr = optimizer.param_groups[0]["lr"]
+                print(f'Batch {idx} Loss: {loss.item():.4f} current lr: {current_lr}')
 
         torch.cuda.synchronize(device)
         epoch_max_vram_mb = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
@@ -216,27 +212,28 @@ if __name__ == "__main__":
         model.eval()
         val_running_loss = 0.0
         val_running_psnr = 0.0
+        val_running_ssim = 0.0
         with torch.no_grad():
             for idx, input_data in enumerate(val_loader):
                 input_data = input_data.squeeze(dim=0).to(device) if input_data.ndim > 5 else input_data.to(device)
                 output, encs, decs = model(input_data)
                 loss = criterion(input_vol=output, target_vol=input_data, enc_feats=encs, dec_feats=decs)
-                psnr_val = peak_signal_noise_ratio(output, input_data, data_range=5.0).item()
+                psnr_val = peak_signal_noise_ratio(output, input_data, data_range=6.53).item()
+                ssim_val = structural_similarity_index_measure(output, input_data, data_range=6.53).item()
                 val_running_loss += loss.item()
                 val_running_psnr += psnr_val
+                val_running_ssim += ssim_val
 
         avg_val_loss = val_running_loss / len(val_loader)
         val_loss_history.append(avg_val_loss)
         avg_val_psnr = val_running_psnr / len(val_loader)
         val_psnr_history.append(avg_val_psnr)
-        avg_psnr = running_psnr / len(train_loader)
-        psnr_history.append(avg_psnr)
         avg_loss = running_loss / len(train_loader)
         loss_history.append(avg_loss)
+        avg_val_ssim = val_running_ssim / len(val_loader)
+        val_ssim_history.append(avg_val_ssim)
         
-        
-        print(f"Epoch [{epoch+1}/{epochs}], avg loss: {avg_loss:.4f}, avg val loss: {avg_val_loss}, avg psnr: {avg_psnr}, avg_val_psnr: {avg_val_psnr}")
-
+        print(f"Epoch [{epoch+1}/{epochs}], peak vram: {epoch_max_vram_mb:.1f} avg loss: {avg_loss:.4f}, avg val loss: {avg_val_loss:.4f}, avg val ssim: {avg_val_ssim:.4f}, avg_val_psnr: {avg_val_psnr:.2f}")
         scheduler.step(avg_val_psnr)
         if avg_val_psnr > best_val_psnr:
             best_val_psnr = avg_val_psnr
@@ -259,14 +256,12 @@ if __name__ == "__main__":
     plt.close()
 
     plt.figure(2)
-    plt.plot(epoch_axis, psnr_history, color='green', linewidth=2, label='Training PSNR')
-    plt.plot(epoch_axis, val_psnr_history, color='red', linestyle='--', linewidth=2, label='Validation PSNR')
-    plt.title('PSNR vs epochs')
+    plt.plot(epoch_axis, val_psnr_history, color='red', linestyle='--', linewidth=2)
+    plt.title('Validation PSNR vs epochs')
     plt.xlabel('Epochs')
     plt.ylabel('PSNR')
     plt.xticks(epoch_axis)
     plt.grid(True)
-    plt.legend()
     plt.savefig('figures/mamba_psnr.svg', format='svg')
     plt.close()
 
@@ -277,6 +272,15 @@ if __name__ == "__main__":
     plt.ylabel('VRAM usage (MB)')
     plt.xticks(epoch_axis)
     plt.grid(True)
-    plt.legend()
     plt.savefig('figures/mamba_vram.svg', format='svg')
+    plt.close()
+
+    plt.figure(4)
+    plt.plot(epoch_axis, val_ssim_history, color='red', linewidth=2)
+    plt.title('Validation SSIM vs epochs')
+    plt.xlabel('Epochs')
+    plt.ylabel('SSIM')
+    plt.xticks(epoch_axis)
+    plt.grid(True)
+    plt.savefig('figures/mamba_ssim.svg', format='svg')
     plt.close()
