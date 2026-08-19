@@ -99,8 +99,8 @@ if __name__ == "__main__":
                 input_data = input_data.squeeze(dim=0).to(device) if input_data.ndim > 5 else input_data.to(device)
                 output, hidden_state_tensor = model(input_data)
                 loss = criterion(input_vol=output, target_vol=input_data, hidden_states=hidden_state_tensor)
-                psnr_val = peak_signal_noise_ratio(output, input_data, data_range=6.53).item()
-                ssim_val = structural_similarity_index_measure(output, input_data, data_range=6.53).item()
+                psnr_val = peak_signal_noise_ratio(output, input_data, data_range=(input_data.max() - input_data.min()).item()).item()
+                ssim_val = structural_similarity_index_measure(output, input_data, data_range=(input_data.max() - input_data.min()).item()).item()
                 val_running_loss += loss.item()
                 val_running_psnr += psnr_val
                 val_running_ssim += ssim_val
