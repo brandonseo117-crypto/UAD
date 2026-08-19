@@ -4,7 +4,6 @@ import torch.optim.lr_scheduler as lr_scheduler
 from monai.networks.nets import VarAutoEncoder
 from dataset import train_loader, val_loader
 from torchmetrics.functional.image import peak_signal_noise_ratio, structural_similarity_index_measure
-import time
 import matplotlib.pyplot as plt
 
 class VAEModel(torch.nn.Module):
@@ -26,6 +25,10 @@ class VAEModel(torch.nn.Module):
     def forward(self, x):
         return self.vae(x)
 
+    def anomaly_mapping(self, x):
+        recon_x, _, _, _ = self(x)
+        return torch.abs(x - recon_x), recon_x 
+
 class ELBOvae(torch.nn.Module):
     def __init__(self, beta=1e-3):
         super().__init__()
@@ -46,7 +49,7 @@ if __name__ == "__main__":
     optimizer = Adam(model.parameters(), lr=1e-4)
     criterion = ELBOvae()
     scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=2, min_lr=1e-6)
-    epochs = 20
+    epochs = 15
 
     vram_history = []
     loss_history = []
@@ -69,7 +72,7 @@ if __name__ == "__main__":
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             running_loss += loss.item()
-                
+            
             if idx % 10 == 0:
                 current_lr = optimizer.param_groups[0]["lr"]
                 print(f'Batch {idx} Loss: {loss.item():.4f} current lr: {current_lr}')
@@ -80,7 +83,7 @@ if __name__ == "__main__":
         model.eval()
         val_running_loss = 0.0
         val_running_psnr = 0.0
-        val_running_ssim = 0.0
+        val_running_ssim =0.0
         with torch.no_grad():
             for idx, input_data in enumerate(val_loader):
                 input_data = input_data.squeeze(dim=0).to(device) if input_data.ndim > 5 else input_data.to(device)
@@ -92,18 +95,17 @@ if __name__ == "__main__":
                 val_running_psnr += psnr_val
                 val_running_ssim += ssim_val
 
-
         avg_val_loss = val_running_loss / len(val_loader)
         val_loss_history.append(avg_val_loss)
         avg_val_psnr = val_running_psnr / len(val_loader)
         val_psnr_history.append(avg_val_psnr)
-        avg_val_ssim = val_running_ssim / len(val_loader)
-        val_ssim_history.append(avg_val_ssim)
         avg_loss = running_loss / len(train_loader)
         loss_history.append(avg_loss)
+        avg_val_ssim = val_running_ssim / len(val_loader)
+        val_ssim_history.append(avg_val_ssim)
         
-        
-        print(f"Epoch [{epoch+1}/{epochs}], peak vram: {epoch_max_vram_mb:.1f} avg loss: {avg_loss:.4f}, avg val loss: {avg_val_loss:.4f}, avg val ssim: {avg_val_ssim:.4f}, avg_val_psnr: {avg_val_psnr:.2f}")
+        print(f"Epoch [{epoch+1}/{epochs}], peak vram: {epoch_max_vram_mb:.1f} avg loss: {avg_loss:.4f}, avg val loss: {avg_val_loss:.4f}, avg val ssim: {avg_val_ssim:.4f}, avg val psnr: {avg_val_psnr:.2f}")
+
         scheduler.step(avg_val_psnr)
         if avg_val_psnr > best_val_psnr:
             best_val_psnr = avg_val_psnr
@@ -126,7 +128,7 @@ if __name__ == "__main__":
     plt.close()
 
     plt.figure(2)
-    plt.plot(epoch_axis, val_psnr_history, color='red', linestyle='--', linewidth=2)
+    plt.plot(epoch_axis, val_psnr_history, color='red', linewidth=2)
     plt.title('Validation PSNR vs epochs')
     plt.xlabel('Epochs')
     plt.ylabel('PSNR')
