@@ -68,11 +68,35 @@ class MambaBlock(nn.Module):
         return rearrange(mlp_out, 'b d h w c -> b c d h w') + tom_out
 
 class MambaModel(nn.Module):
-    def __init__(self, channels):
+    def __init__(self, in_channels=1, out_channels=1):
         super().__init__()
-        self.conv1 = nn.Conv3d(in_channels=channels, out_channels=channels, kernel_size=7, stride=2, padding=3)
-        self.mambablock1 = MambaBlock(192)
-        self.conv2 = nn.Conv3d
+        #encoder part
+        self.stem = nn.Conv3d(in_channels=in_channels, out_channels=32, kernel_size=7, stride=2, padding=3)
+        self.mambablock1 = MambaBlock(32)
+        self.downsample = nn.Conv3d(in_channels=32, out_channels=128, kernel_size=3, stride=2, padding=1)
+        self.mambablock2 = MambaBlock(128)
+
+        #decoder part
+        self.mambablock3 = MambaBlock(128)
+        self.upsample = nn.ConvTranspose3d(in_channels=128, out_channels=32, kernel_size=3, stride=2, padding=1, output_padding=1)
+        self.mambablock4 = MambaBlock(32)
+        self.upsample2 = nn.ConvTranspose3d(in_channels=32, out_channels=out_channels, kernel_size=7, stride=2, padding=3, output_padding=1)
+
+    def forward(self, x):
+        x = self.stem(x)
+        x = self.mambablock1(x)
+        x = self.downsample(x)
+        x = self.mambablock2(x)
+
+        # Decoder
+        x = self.mambablock3(x)
+        x = self.upsample(x)
+        x = self.mambablock4(x)
+        out = self.upsample2(x)
+        
+        return out
+
+
 
 class DualDomainLoss(nn.Module):
     def __init__(self, alpha=1.0, beta=0.4):
