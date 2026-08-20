@@ -1,3 +1,5 @@
+from typing import Any
+
 import torch
 import torch.nn as nn
 from einops import rearrange
@@ -8,149 +10,34 @@ from mamba_ssm import Mamba
 from torchmetrics.functional.image import peak_signal_noise_ratio, structural_similarity_index_measure
 import matplotlib.pyplot as plt
 
-class GatedSpatialConv3d(nn.Module): #good
-    def __init__(self, channels):
+class GatedSpatialConvolution(nn.Module):
+    def __init__(self, in_channels):
         super().__init__()
-        self.conv_3x3 = nn.Sequential(
-            nn.Conv3d(channels, channels, kernel_size=3, padding=1),
-            nn.InstanceNorm3d(channels),
-            nn.SiLU()
-        )
-
-        self.conv_1x1 = nn.Sequential(
-            nn.Conv3d(channels, channels, kernel_size=1),
-            nn.InstanceNorm3d(channels),
-            nn.SiLU()
-        )
-
-        self.fuse = nn.Conv3d(channels, channels, kernel_size=3, padding=1)
+        self.conv3x3 = nn.Sequential(nn.BatchNorm3d(in_channels), nn.SiLU(), nn.Conv3d(in_channels=in_channels, out_channels=in_channels, kernel_size=3, padding=1))
+        self.conv1x1 = nn.Sequential(nn.BatchNorm3d(in_channels), nn.SiLU(), nn.Conv3d(in_channels=in_channels, out_channels=in_channels, kernel_size=1))
+        self.fusion = nn.Sequential(nn.BatchNorm3d(in_channels), nn.SiLU(), nn.Conv3d(in_channels=in_channels, out_channels=in_channels, kernel_size=3, padding=1))
 
     def forward(self, x):
-        gated = self.conv_3x3(x) * self.conv_1x1(x)
-        return x + self.fuse(gated)
+        return x + self.fusion(self.conv3x3(x) * self.conv1x1(x))
+
+class ToM(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mamba1 = Mamba(d_model=192, d_state=16, d_conv=4, expand=2)
+        self.mamba2 = Mamba(d_model=192, d_state=16, d_conv=4, expand=2)
+        self.mamba3 = Mamba(d_model=192, d_state=16, d_conv=4, expand=2)
+
+    def forward(self, x):
+        B, C, D, H, W = x.shape
+        z_f = rearrange(x, 'b c d h w -> b (d h w) c')
+        z_r = rearrange(x[:, :, ::-1, ::-1, ::-1], 'b c d h w -> b (d h w) c')
+        z_s = rearrange(x, 'b c d h w -> b (w h d) c')
+        fused = self.mamba1(z_f) + self.mamba2(z_r) + self.mamba3(z_s)
+        return rearrange(fused, 'b (d h w) c -> b d h w c', d=D, h=H, w=W)
+
 
 # ToM, TSMamba, and U-shape ae still needed
 # loss fn
-
-
-class TriOrientatedMamba(nn.Module):
-    """
-    ToM Module (SegMamba architecture): Captures 3D spatial dependencies 
-    by scanning through Forward, Reverse, and Inter-slice orientations.
-    """
-    def __init__(self, d_model, d_state=16, d_conv=4, expand=2):
-        super().__init__()
-        if Mamba is None:
-            raise ImportError(
-                "mamba_ssm is required. Install via `pip install mamba-ssm` "
-                "in a CUDA-enabled environment."
-            )
-            
-        # Distinct Mamba instances for each orientation
-        self.mamba_f = Mamba(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
-        self.mamba_r = Mamba(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
-        self.mamba_s = Mamba(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
-
-    def forward(self, x):
-        B, C, D, H, W = x.shape
-        
-        x_f = rearrange(x, 'b c d h w -> b (d h w) c')
-        y_f = self.mamba_f(x_f)
-        y_f = rearrange(y_f, 'b (d h w) c -> b c d h w', d=D, h=H, w=W)
-        
-        x_r = torch.flip(x_f, dims=[1])
-        y_r = self.mamba_r(x_r)
-        y_r = torch.flip(y_r, dims=[1])
-        y_r = rearrange(y_r, 'b (d h w) c -> b c d h w', d=D, h=H, w=W)
-        
-        x_s_perm = rearrange(x, 'b c d h w -> b c w h d')
-        x_s = rearrange(x_s_perm, 'b c w h d -> b (w h d) c')
-        y_s = self.mamba_s(x_s)
-        y_s = rearrange(y_s, 'b (w h d) c -> b c w h d', w=W, h=H, d=D)
-        y_s = rearrange(y_s, 'b c w h d -> b c d h w')
-        
-        # Fusion
-        return y_f + y_r + y_s
-
-
-class TSMambaBlock(nn.Module): # good
-    def __init__(self, dim):
-        super().__init__()
-        self.gsc = GatedSpatialConv3d(dim)
-        self.tom = TriOrientatedMamba(d_model=dim)
-        self.norm1 = nn.InstanceNorm1d(dim)
-        self.norm2 = nn.InstanceNorm1d(dim)
-
-        self.mlp = nn.Sequential(
-            nn.Linear(dim, dim * 4),
-            nn.SiLU(),
-            nn.Linear(dim * 4, dim)
-        )
-
-    def forward(self, x):
-        x = self.gsc(x)
-
-        B, C, D, H, W = x.shape
-        res = x
-        x = rearrange(x, 'b c d h w -> b c (d h w)')
-        x = self.norm1(x)
-        x = rearrange(x, 'b c (d h w) -> b c d h w', d=D, h=H, w=W)
-        x = self.tom(x) + res
-        
-        res = x
-        x = rearrange(x, 'b c d h w -> b c (d h w)')
-        x = self.norm2(x)
-        
-        x = rearrange(x, 'b c (d h w) -> b (d h w) c')
-        x = self.mlp(x)
-        x = rearrange(x, 'b (d h w) c -> b c d h w', d=D, h=H, w=W)
-        
-        return x + res
-
-
-class MambaUAD(nn.Module): #Good
-    def __init__(self, in_channels=1, base_dim=48):
-        super().__init__()
-        # Stem: 7x7x7 Depth-wise Conv, Stride 2 [10]
-        self.stem = nn.Conv3d(in_channels, base_dim,kernel_size=7, stride=2, padding=3)
-
-        # Encoder Layers [11]
-        self.enc1 = TSMambaBlock(base_dim)
-        self.down1 = nn.Conv3d(base_dim, base_dim*2, kernel_size=2, stride=2)
-        self.enc2 = TSMambaBlock(base_dim*2)
-        self.down2 = nn.Conv3d(base_dim*2, base_dim*4, kernel_size=2, stride=2)
-
-        # Bottleneck
-        self.bottleneck = TSMambaBlock(base_dim*4)
-
-        # Gating mechanism
-        self.gate1 = GatedSpatialConv3d(base_dim)
-        self.gate2 = GatedSpatialConv3d(base_dim*2)
-
-        # Decoder Layers (Symmetric) [9]
-        self.up2 = nn.ConvTranspose3d(base_dim*4, base_dim*2, kernel_size=2, stride=2)
-        self.dec2 = TSMambaBlock(base_dim*2)
-        self.up1 = nn.ConvTranspose3d(base_dim*2, base_dim, kernel_size=2, stride=2)
-        self.dec1 = TSMambaBlock(base_dim)
-
-        # Final Reconstruction Head
-        self.final_up = nn.ConvTranspose3d(base_dim, in_channels, kernel_size=2, stride=2)
-
-    def forward(self, x):
-        # Encoder path with GATED skip connections
-        s0 = self.stem(x)
-        e1 = self.enc1(s0)
-        e2 = self.enc2(self.down1(e1))
-        b = self.bottleneck(self.down2(e2))
-        up_b = self.up2(b)
-        gated_e2 = self.gate2(e2)
-        d2 = self.dec2(up_b + gated_e2)
-        up_d2 = self.up1(d2)
-        gated_e1 = self.gate1(e1)
-        d1 = self.dec1(up_d2 + gated_e1)
-
-        out = self.final_up(d1)
-        return out, [e1, e2], [d1, d2]
 
 
 class DualDomainLoss(nn.Module):

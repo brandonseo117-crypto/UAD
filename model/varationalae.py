@@ -25,10 +25,6 @@ class VAEModel(torch.nn.Module):
     def forward(self, x):
         return self.vae(x)
 
-    def anomaly_mapping(self, x):
-        recon_x, _, _, _ = self(x)
-        return torch.abs(x - recon_x), recon_x 
-
 class ELBOvae(torch.nn.Module):
     def __init__(self, beta=1e-3):
         super().__init__()
