@@ -1,5 +1,3 @@
-from typing import Any
-
 import torch
 import torch.nn as nn
 from einops import rearrange
@@ -30,11 +28,19 @@ class ToM(nn.Module):
     def forward(self, x):
         B, C, D, H, W = x.shape
         z_f = rearrange(x, 'b c d h w -> b (d h w) c')
-        z_r = rearrange(x[:, :, ::-1, ::-1, ::-1], 'b c d h w -> b (d h w) c')
-        z_s = rearrange(x, 'b c d h w -> b (w h d) c')
-        fused = self.mamba1(z_f) + self.mamba2(z_r) + self.mamba3(z_s)
+        out_f = self.mamba1(z_f)
+        out_f = rearrange(out_f, 'b (d h w) c -> b c d h w', d=D, h=H, w=W)
+        
+        z_r = rearrange(torch.flip(x, dims=[2,3,4]).contiguous(), 'b c d h w -> b (d h w) c')
+        out_r = self.mamba2(z_r)
+        out_r = rearrange(out_r, 'b (d h w) c -> b c d h w', d=D, h=H, w=W)
+        out_r = torch.flip(out_r, dims=[2, 3, 4])
 
-        return rearrange(fused, 'b (d h w) c -> b c d h w', d=D, h=H, w=W)
+        z_s = rearrange(x, 'b c d h w -> b (w h d) c')
+        out_s = self.mamba3(z_s)
+        out_s = rearrange(out_s, 'b (w h d) c -> b c d h w', w=W, h=H, d=D)
+
+        return out_f + out_s + out_r
 
 class MambaBlock(nn.Module):
     def __init__(self, channels=192):
@@ -57,14 +63,16 @@ class MambaBlock(nn.Module):
         tom_out = self.tri(ln1_out) + gsc_out
         ln2_in = rearrange(tom_out, 'b c d h w -> b d h w c')
         ln2_out = self.ln2(ln2_in)
-        reduced = self.mlp(ln2_out)
+        mlp_out = self.mlp(ln2_out)
 
-        return rearrange(reduced, 'b d h w c -> b c d h w') + tom_out
+        return rearrange(mlp_out, 'b d h w c -> b c d h w') + tom_out
 
-
-# ToM, TSMamba, and U-shape ae still needed
-# loss fn
-
+class MambaModel(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.conv1 = nn.Conv3d(in_channels=channels, out_channels=channels, kernel_size=7, stride=2, padding=3)
+        self.mambablock1 = MambaBlock(192)
+        self.conv2 = nn.Conv3d
 
 class DualDomainLoss(nn.Module):
     def __init__(self, alpha=1.0, beta=0.4):
