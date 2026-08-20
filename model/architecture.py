@@ -21,11 +21,11 @@ class GatedSpatialConvolution(nn.Module):
         return x + self.fusion(self.conv3x3(x) * self.conv1x1(x))
 
 class ToM(nn.Module):
-    def __init__(self):
+    def __init__(self, channels):
         super().__init__()
-        self.mamba1 = Mamba(d_model=192, d_state=16, d_conv=4, expand=2)
-        self.mamba2 = Mamba(d_model=192, d_state=16, d_conv=4, expand=2)
-        self.mamba3 = Mamba(d_model=192, d_state=16, d_conv=4, expand=2)
+        self.mamba1 = Mamba(d_model=channels, d_state=16, d_conv=4, expand=2)
+        self.mamba2 = Mamba(d_model=channels, d_state=16, d_conv=4, expand=2)
+        self.mamba3 = Mamba(d_model=channels, d_state=16, d_conv=4, expand=2)
 
     def forward(self, x):
         B, C, D, H, W = x.shape
@@ -33,7 +33,33 @@ class ToM(nn.Module):
         z_r = rearrange(x[:, :, ::-1, ::-1, ::-1], 'b c d h w -> b (d h w) c')
         z_s = rearrange(x, 'b c d h w -> b (w h d) c')
         fused = self.mamba1(z_f) + self.mamba2(z_r) + self.mamba3(z_s)
-        return rearrange(fused, 'b (d h w) c -> b d h w c', d=D, h=H, w=W)
+
+        return rearrange(fused, 'b (d h w) c -> b c d h w', d=D, h=H, w=W)
+
+class MambaBlock(nn.Module):
+    def __init__(self, channels=192):
+        super().__init__()
+        self.gsc = GatedSpatialConvolution(channels)
+        self.ln1 = nn.LayerNorm(channels)
+        self.tri = ToM(channels)
+        self.ln2 = nn.LayerNorm(channels)
+        self.mlp = nn.Sequential(
+            nn.Linear(channels, channels*2),
+            nn.GELU(),
+            nn.Linear(channels*2, channels)
+            )
+        
+    def forward(self, x):
+        gsc_out = self.gsc(x)
+        ln1_in = rearrange(gsc_out, 'b c d h w -> b d h w c')
+        ln1_out = self.ln1(ln1_in)
+        ln1_out = rearrange(ln1_out, 'b d h w c -> b c d h w')
+        tom_out = self.tri(ln1_out) + gsc_out
+        ln2_in = rearrange(tom_out, 'b c d h w -> b d h w c')
+        ln2_out = self.ln2(ln2_in)
+        reduced = self.mlp(ln2_out)
+
+        return rearrange(reduced, 'b d h w c -> b c d h w') + tom_out
 
 
 # ToM, TSMamba, and U-shape ae still needed
